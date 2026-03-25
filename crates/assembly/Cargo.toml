@@ -1,0 +1,11 @@
+[package]
+name = "brookshear_assembly"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+chumsky = { version = "0.12.0", features = ["pratt"] }
+logos = "0.16.1"
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.18"

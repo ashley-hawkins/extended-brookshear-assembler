@@ -1,0 +1,4 @@
+[workspace]
+members = ["crates/assembler_cli","crates/assembly"]
+package.license = "GPL-3.0-only"
+resolver = "3"
