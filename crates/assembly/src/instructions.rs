@@ -1,6 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::os_str::Display,
+};
 
-use chumsky::span::{SimpleSpan, Spanned};
+use chumsky::span::{SimpleSpan, Span, Spanned};
 
 use crate::{
     lexer::Register,
@@ -15,11 +18,11 @@ struct Context<'a> {
 }
 
 fn perform_arithmetic<'b>(
-    left: &'b ConstantExpr,
-    right: &'b ConstantExpr,
+    left: &'b Spanned<ConstantExpr>,
+    right: &'b Spanned<ConstantExpr>,
     operator: Spanned<ArithmeticOperator>,
-    mut evaluate_expr: impl FnMut(&'b ConstantExpr) -> Result<u8, String>,
-) -> Result<u8, String> {
+    mut evaluate_expr: impl FnMut(&'b Spanned<ConstantExpr>) -> SerializeResult<u8>,
+) -> SerializeResult<u8> {
     let left_val = evaluate_expr(left)?;
     let right_val = evaluate_expr(right)?;
     Ok(match operator.inner {
@@ -32,8 +35,8 @@ fn perform_arithmetic<'b>(
 }
 
 impl<'a> Context<'a> {
-    fn evaluate_constant_expr(&self, expr: &ConstantExpr) -> Result<u8, String> {
-        match expr {
+    fn evaluate_constant_expr(&self, expr: &Spanned<ConstantExpr>) -> SerializeResult<u8> {
+        match &expr.inner {
             ConstantExpr::Fundamental(Spanned {
                 inner: Constant::Literal(val),
                 ..
@@ -49,7 +52,10 @@ impl<'a> Context<'a> {
                     val
                 })
                 .cloned()
-                .ok_or_else(|| format!("Undefined constant: {}", symbol)),
+                .ok_or_else(|| {
+                    SerializationErrorMessage::UndefinedConstant(symbol.to_string())
+                        .with_span(Some(expr.span))
+                }),
             ConstantExpr::Arithmetic {
                 left,
                 right,
@@ -62,43 +68,84 @@ impl<'a> Context<'a> {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum SerializationError {
+enum SerializationErrorMessage {
     #[error("Instruction requires exactly {expected} operands, but found {found}")]
     UnexpectedOperandCount { expected: usize, found: usize },
     #[error("Instruction does not take a destination operand, but one was provided")]
     UnexpectedDestinationOperand,
-    #[error("Invalid operand combination for instruction: {0}")]
+    #[error("Instruction requires a destination operand, but none was provided")]
+    MissingDestinationOperand,
+    #[error("Invalid operand combination: {0}")]
     InvalidOperandCombination(String),
+    #[error("Invalid operand: {0}")]
+    InvalidOperand(String),
+    #[error("Undefined constant: {0}")]
+    UndefinedConstant(String),
+    #[error("{0}")]
+    UnknownError(String),
 }
 
-// fn serialize_argument_combination(detail: &InstructionDetail) -> String {
-//     let operands = detail
-//         .operands
-//         .iter()
-//         .map(|op| {
-//             let core = match &op.core {
-//                 CoreOperand::Register(..) => format!("R{:X}", *r as u8),
-//                 CoreOperand::Constant(..) => format!("Const({:?})", expr),
-//             };
-//             if op.deref {
-//                 format!("[{}]", core)
-//             } else {
-//                 core
-//             }
-//         })
-//         .collect::<Vec<_>>()
-//         .join(", ");
-// }
-
-fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
-    if detail.operands.len() != 1 {
-        return Err(format!(
-            "MOV instruction requires exactly 1 regular operand (which is the source) and 1 destination operand, but found {} regular operands",
-            detail.operands.len()
-        ));
+impl SerializationErrorMessage {
+    fn with_span(self, span: Option<SimpleSpan>) -> SerializationError {
+        SerializationError {
+            message: self,
+            span,
+        }
     }
+}
 
-    let src = &detail.operands[0];
+#[derive(Debug)]
+struct SerializationError {
+    message: SerializationErrorMessage,
+    span: Option<SimpleSpan>,
+}
+
+type SerializeResult<T> = Result<T, SerializationError>;
+
+fn assert_operands<'src, 'a, const EXPECTED: usize>(
+    detail: &'a InstructionDetail<'src>,
+) -> SerializeResult<&'a [Spanned<Operand<'src>>; EXPECTED]> {
+    <&'a [Spanned<Operand<'src>>; EXPECTED] as TryFrom<&'a [Spanned<Operand<'src>>]>>::try_from(
+        detail.operands.as_ref(),
+    )
+    .map_err(|e| {
+        let found = detail.operands.len();
+        SerializationErrorMessage::UnexpectedOperandCount {
+            expected: EXPECTED,
+            found,
+        }
+        .with_span(Some(SimpleSpan::new(
+            (),
+            detail.operands.first().unwrap().span.start..detail.operands.last().unwrap().span.end,
+        )))
+    })
+}
+
+fn assert_no_operands(detail: &InstructionDetail) -> SerializeResult<()> {
+    assert_operands::<0>(detail).map(drop)
+}
+
+fn assert_no_destination_operand(detail: &InstructionDetail) -> SerializeResult<()> {
+    if let Some(output) = detail.output.as_ref() {
+        Err(SerializationErrorMessage::UnexpectedDestinationOperand.with_span(Some(output.span)))
+    } else {
+        Ok(())
+    }
+}
+
+fn assert_destination_operand<'src, 'a>(
+    detail: &'a InstructionDetail<'src>,
+) -> SerializeResult<&'a Spanned<OutputOperand<'src>>> {
+    if let Some(output) = detail.output.as_ref() {
+        Ok(output)
+    } else {
+        Err(SerializationErrorMessage::MissingDestinationOperand.with_span(None))
+    }
+}
+
+fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
+    let [src] = assert_operands(detail)?;
+
     let dst = detail.output.as_ref().unwrap();
 
     match (&src.inner, &dst.inner) {
@@ -165,72 +212,74 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], S
                 deref: true,
                 core: CoreOperand::Register(..),
             },
-            OutputOperand::RegisterDeref(..)
-        ) => Err("MOV [Rr] -> [Rr] is not supported.".to_string()),
+            OutputOperand::RegisterDeref(..),
+        ) => Err(SerializationErrorMessage::InvalidOperandCombination(
+            "MOV [Rr] -> [Rr] is not supported.".to_string(),
+        )
+        .with_span(Some(src.span.union(dst.span)))),
+        (
+            Operand {
+                deref: false,
+                core: CoreOperand::Constant(..),
+            },
+            OutputOperand::RegisterDeref(..),
+        ) => Err(SerializationErrorMessage::InvalidOperandCombination(
+            "MOV xy -> [Rr] is not supported.".to_string(),
+        )
+        .with_span(Some(src.span.union(dst.span)))),
+        (
+            Operand {
+                deref: true,
+                core: CoreOperand::Constant(..),
+            },
+            OutputOperand::RegisterDeref(..),
+        ) => Err(SerializationErrorMessage::InvalidOperandCombination(
+            "MOV [xy] -> [Rr] is not supported.".to_string(),
+        )
+        .with_span(Some(src.span.union(dst.span)))),
         (
             Operand {
                 deref: true,
                 core: CoreOperand::Constant(..),
             },
             OutputOperand::ConstantDeref(..),
-        ) => Err("MOV [xy] -> [xy] is not supported.".to_string()),
+        ) => Err(SerializationErrorMessage::InvalidOperandCombination(
+            "MOV [xy] -> [xy] is not supported.".to_string(),
+        )
+        .with_span(Some(src.span.union(dst.span)))),
         (
             Operand {
                 deref: false,
                 core: CoreOperand::Constant(..),
             },
             OutputOperand::ConstantDeref(..),
-        ) => Err("MOV xy -> [xy] is not supported.".to_string()),
+        ) => Err(SerializationErrorMessage::InvalidOperandCombination(
+            "MOV xy -> [xy] is not supported.".to_string(),
+        )
+        .with_span(Some(src.span.union(dst.span)))),
         (
             Operand {
                 deref: true,
                 core: CoreOperand::Register(..),
             },
             OutputOperand::ConstantDeref(..),
-        ) => Err("MOV [Rr] -> [xy] is not supported.".to_string()),
-        (
-            Operand {
-                deref: true,
-                core: CoreOperand::Constant(..),
-            },
-            OutputOperand::RegisterDeref(..),
-        ) => Err("MOV [xy] -> [Rr] is not supported.".to_string()),
-        (
-            Operand {
-                deref: false,
-                core: CoreOperand::Constant(..),
-            },
-            OutputOperand::RegisterDeref(..),
-        ) => Err("MOV xy -> [Rr] is not supported.".to_string()),
+        ) => Err(SerializationErrorMessage::InvalidOperandCombination(
+            "MOV [Rr] -> [xy] is not supported.".to_string(),
+        )
+        .with_span(Some(src.span.union(dst.span)))),
     }
 }
 
-fn serialize_halt(detail: &InstructionDetail, _ctx: &Context) -> Result<[u8; 2], String> {
-    if !detail.operands.is_empty() {
-        return Err(format!(
-            "HALT instruction does not take any regular operands, but found {}",
-            detail.operands.len()
-        ));
-    }
-
-    if detail.output.is_some() {
-        return Err("HALT instruction does not take a destination operand".to_string());
-    }
+fn serialize_halt(detail: &InstructionDetail, _ctx: &Context) -> SerializeResult<[u8; 2]> {
+    assert_no_operands(detail)?;
+    assert_no_destination_operand(detail)?;
 
     Ok([0xC0, 0x00])
 }
 
-fn serialize_nop(detail: &InstructionDetail, _ctx: &Context) -> Result<[u8; 2], String> {
-    if !detail.operands.is_empty() {
-        return Err(format!(
-            "NOP instruction does not take any regular operands, but found {}",
-            detail.operands.len()
-        ));
-    }
-
-    if detail.output.is_some() {
-        return Err("NOP instruction does not take a destination operand".to_string());
-    }
+fn serialize_nop(detail: &InstructionDetail, _ctx: &Context) -> SerializeResult<[u8; 2]> {
+    assert_no_operands(detail)?;
+    assert_no_destination_operand(detail)?;
 
     Ok([0x0F, 0xFF])
 }
@@ -239,32 +288,37 @@ fn serialize_2regin_1regout(
     detail: &InstructionDetail,
     _ctx: &Context,
     opcode: u8,
-) -> Result<[u8; 2], String> {
-    if detail.operands.len() != 2 {
-        return Err(format!(
-            "Instruction requires exactly 2 regular operands, but found {}",
-            detail.operands.len()
-        ));
-    }
-
-    let src1 = &detail.operands[0];
-    let src2 = &detail.operands[1];
+) -> SerializeResult<[u8; 2]> {
+    let [src1, src2] = assert_operands(detail)?;
+    let dst = assert_destination_operand(detail)?;
 
     let src1reg = match src1.inner.core {
         CoreOperand::Register(r) => r,
-        _ => return Err("First source operand must be a register".to_string()),
+        _ => {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Source operands must be registers".to_string(),
+            )
+            .with_span(Some(src1.span)));
+        }
     };
     let src2reg = match src2.inner.core {
         CoreOperand::Register(r) => r,
-        _ => return Err("Second source operand must be a register".to_string()),
+        _ => {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Second source operand must be a register".to_string(),
+            )
+            .with_span(Some(src2.span)));
+        }
     };
 
-    let dst = detail.output.as_ref().ok_or_else(|| {
-        "Instruction requires a destination operand, but none was provided".to_string()
-    })?;
     let dst_reg = match dst.inner {
         OutputOperand::Register(r) => r,
-        _ => return Err("Destination operand must be a register".to_string()),
+        _ => {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Destination operand must be a register".to_string(),
+            )
+            .with_span(Some(dst.span)));
+        }
     };
 
     Ok([
@@ -273,57 +327,48 @@ fn serialize_2regin_1regout(
     ])
 }
 
-fn serialize_addi(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_addi(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_2regin_1regout(detail, ctx, 0x50)
 }
 
-fn serialize_addf(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_addf(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_2regin_1regout(detail, ctx, 0x60)
 }
 
-fn serialize_or(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_or(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_2regin_1regout(detail, ctx, 0x70)
 }
 
-fn serialize_and(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_and(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_2regin_1regout(detail, ctx, 0x80)
 }
 
-fn serialize_xor(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_xor(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_2regin_1regout(detail, ctx, 0x90)
 }
 
-fn serialize_rot(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
-    if detail.operands.len() != 2 {
-        return Err(format!(
-            "ROT instruction requires exactly 2 regular operands, but found {}",
-            detail.operands.len()
-        ));
-    }
+fn serialize_rot(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
+    let [target, amount] = assert_operands(detail)?;
+    assert_no_destination_operand(detail)?;
 
-    if detail.output.is_some() {
-        return Err("ROT instruction does not take a destination operand".to_string());
-    }
-
-    let target = &detail.operands[0];
     let target_reg = match target.inner.core {
         CoreOperand::Register(r) => r,
-        _ => return Err("Target of ROT must be a register".to_string()),
+        _ => {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Target of ROT must be a register".to_string(),
+            )
+            .with_span(Some(target.span)));
+        }
     };
 
-    let amount = &detail.operands[1];
     let amount_constant = match &amount.inner.core {
-        CoreOperand::Constant(expr) => {
-            let val = ctx.evaluate_constant_expr(expr)?;
-            if val > 7 {
-                return Err(format!(
-                    "Rotation amount must be between 0 and 7, but got {}",
-                    val
-                ));
-            }
-            val
+        CoreOperand::Constant(expr) => ctx.evaluate_constant_expr(expr)?.rem_euclid(16),
+        _ => {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Amount operand of ROT must be an immediate constant expression".to_string(),
+            )
+            .with_span(Some(amount.span)));
         }
-        _ => return Err("Amount of ROT must be an immediate constant".to_string()),
     };
 
     Ok([0xA0 | *target_reg as u8, amount_constant as u8])
@@ -343,136 +388,114 @@ fn cmpjmp(
     target: Register,
     comparison_operand: Register,
     operator: CmpjmpOperator,
-) -> Result<[u8; 2], String> {
+) -> SerializeResult<[u8; 2]> {
     Ok([
         0xF0 | comparison_operand as u8,
         (operator as u8) << 4 | target as u8,
     ])
 }
 
-fn jmpeq(target: &Operand, comparison_operand: Register, ctx: &Context) -> Result<[u8; 2], String> {
-    match target {
+fn jmpeq(
+    target: &Spanned<Operand>,
+    comparison_operand: Register,
+    ctx: &Context,
+) -> SerializeResult<[u8; 2]> {
+    match &target.inner {
         Operand {
             deref: false,
             core: CoreOperand::Constant(expr),
         } => {
             let addr = ctx.evaluate_constant_expr(expr)?;
-            if addr > 0x7F {
-                return Err(format!(
-                    "Jump address must be between 0 and 127, but got {}",
-                    addr
-                ));
-            }
             Ok([0xB0 | comparison_operand as u8, addr])
         }
         Operand {
             deref: false,
             core: CoreOperand::Register(r),
         } => cmpjmp(**r, comparison_operand, CmpjmpOperator::Eq),
-        _ => Err(
+        _ => Err(SerializationErrorMessage::InvalidOperand(
             "Jump location of JMPEQ must be either a direct register or an immediate constant"
                 .to_string(),
-        ),
+        )
+        .with_span(Some(target.span))),
     }
 }
 
-fn serialize_jmp(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
-    if detail.operands.len() != 1 {
-        return Err(format!(
-            "JMP instruction requires exactly 1 regular operand, but found {}",
-            detail.operands.len()
-        ));
-    }
+fn serialize_jmp(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
+    let [jmp_location] = assert_operands(detail)?;
+    assert_no_destination_operand(detail)?;
 
-    if detail.output.is_some() {
-        return Err("JMP instruction does not take a destination operand".to_string());
-    }
-
-    let jmp_location = &detail.operands[0];
-
-    jmpeq(&jmp_location.inner, Register::R0, ctx)
+    jmpeq(jmp_location, Register::R0, ctx)
 }
 
-fn serialize_jmpeq(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
-    if detail.operands.len() != 2 {
-        return Err(format!(
-            "JMPEQ instruction requires exactly 2 regular operands, but found {}",
-            detail.operands.len()
-        ));
-    }
+fn serialize_jmpeq(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
+    let [jmp_location, comparison_operand] = assert_operands(detail)?;
+    assert_no_destination_operand(detail)?;
 
-    if detail.output.is_some() {
-        return Err("JMPEQ instruction does not take a destination operand".to_string());
-    }
-
-    let jmp_location = &detail.operands[0];
-
-    let comparison_operand = &detail.operands[1];
     let comparison_operand_reg = match comparison_operand.inner {
         Operand {
             deref: false,
             core: CoreOperand::Register(r),
         } => r,
-        _ => return Err("Comparison operand of JMPEQ must be a direct register".to_string()),
+        _ => {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Comparison operand of JMPEQ must be a direct register".to_string(),
+            )
+            .with_span(Some(comparison_operand.span)));
+        }
     };
 
-    jmpeq(&jmp_location.inner, *comparison_operand_reg, ctx)
+    jmpeq(jmp_location, *comparison_operand_reg, ctx)
 }
 
 fn serialize_cmpjmp(
     detail: &InstructionDetail,
     _ctx: &Context,
     operator: CmpjmpOperator,
-) -> Result<[u8; 2], String> {
-    if detail.operands.len() != 2 {
-        return Err(format!(
-            "Instruction requires exactly 2 regular operands, but found {}",
-            detail.operands.len()
-        ));
-    }
+) -> SerializeResult<[u8; 2]> {
+    let [jmp_location, comparison_operand] = assert_operands(detail)?;
+    assert_no_destination_operand(detail)?;
 
-    if detail.output.is_some() {
-        return Err("Instruction does not take a destination operand".to_string());
-    }
-
-    let jmp_location = &detail.operands[0];
     let jmp_location_reg = match jmp_location.inner {
         Operand {
             deref: false,
             core: CoreOperand::Register(r),
         } => r,
-        _ => return Err("Jump location must be a direct register, except for JMP and JMPEQ which allow an immediate location".to_string()),
+        _ => return Err(SerializationErrorMessage::InvalidOperand("Jump location must be a direct register, except for JMP and JMPEQ which allow an immediate location".to_string()).with_span(Some(jmp_location.span))),
     };
 
-    let comparison_operand = &detail.operands[1];
     let comparison_operand_reg = match comparison_operand.inner {
         Operand {
             deref: false,
             core: CoreOperand::Register(r),
         } => r,
-        _ => return Err("Comparison operand must be a direct register".to_string()),
+        _ => {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Comparison operand must be a direct register".to_string(),
+            )
+            .with_span(Some(comparison_operand.span)));
+        }
     };
 
     cmpjmp(*jmp_location_reg, *comparison_operand_reg, operator)
 }
 
-fn serialize_jmpne(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_jmpne(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_cmpjmp(detail, ctx, CmpjmpOperator::Ne)
 }
 
-fn serialize_jmpge(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_jmpge(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_cmpjmp(detail, ctx, CmpjmpOperator::Ge)
 }
 
-fn serialize_jmple(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_jmple(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_cmpjmp(detail, ctx, CmpjmpOperator::Le)
 }
 
-fn serialize_jmpgt(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_jmpgt(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_cmpjmp(detail, ctx, CmpjmpOperator::Gt)
 }
 
-fn serialize_jmplt(detail: &InstructionDetail, ctx: &Context) -> Result<[u8; 2], String> {
+fn serialize_jmplt(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     serialize_cmpjmp(detail, ctx, CmpjmpOperator::Lt)
 }
 
@@ -491,32 +514,22 @@ enum SerializedInstruction {
 fn serialize_instruction<'a>(
     instr: &Spanned<Instruction<'a>>,
     ctx: &Context,
-) -> Result<SerializedInstruction, String> {
+) -> SerializeResult<SerializedInstruction> {
     Ok(SerializedInstruction::Code(
         match instr.inner.mnemonic.inner {
             "CONST" => {
                 unreachable!("CONST should have been skipped in an earlier pass.");
             }
             "DATA" => {
-                if instr.inner.detail.operands.len() != 1 {
-                    panic!(
-                        "DATA instruction requires exactly 1 operand, but found {}",
-                        instr.inner.detail.operands.len()
-                    );
-                }
+                let [expr] = assert_operands(&instr.inner.detail)?;
+                assert_no_destination_operand(&instr.inner.detail)?;
 
-                if instr.inner.detail.output.is_some() {
-                    panic!(
-                        "DATA instruction does not take a destination operand, but one was provided"
-                    );
-                }
-
-                let value = match &instr.inner.detail.operands[0].inner.core {
+                let value = match &expr.inner.core {
                     CoreOperand::Constant(expr) => {
                         ctx.evaluate_constant_expr(expr).unwrap_or_else(|err| {
                             panic!(
                                 "Error evaluating constant expression for DATA at {:?}: {}",
-                                instr.span, err
+                                instr.span, err.message
                             )
                         })
                     }
@@ -583,20 +596,12 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
             if let Some(instr) = &line.instruction {
                 match instr.inner.mnemonic.inner {
                     "CONST" => {
-                        if instr.inner.detail.operands.len() != 1 {
-                            panic!(
-                                "CONST instruction requires exactly 1 operand, but found {}",
-                                instr.inner.detail.operands.len()
-                            );
-                        }
+                        let [expr] = assert_operands(&instr.inner.detail)
+                            .unwrap_or_else(|err| panic!("{}", err.message));
+                        assert_no_destination_operand(&instr.inner.detail)
+                            .unwrap_or_else(|err| panic!("{}", err.message));
 
-                        if instr.inner.detail.output.is_some() {
-                            panic!(
-                                "CONST instruction does not take a destination operand, but one was provided"
-                            );
-                        }
-
-                        let constant_expr = match &instr.inner.detail.operands[0].inner.core {
+                        let constant_expr = match &expr.inner.core {
                             CoreOperand::Constant(expr) => expr,
                             _ => {
                                 panic!("Operand of CONST must be an immediate constant expression")
@@ -671,102 +676,6 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
 
     let ctx = Context { constants };
 
-    // let mut cells = [None; 128];
-    // let mut ranges = vec![];
-    // {
-    //     let mut current_addr = 0u32;
-    //     let mut just_set_addr = false;
-    //     let mut prev_was_data = false;
-    //     let mut run_start_addr = 0u32;
-    //     for line in program {
-    //         if let Some(Spanned {
-    //             inner: Annotation::Offset(offset),
-    //             ..
-    //         }) = line.annotation
-    //         {
-    //             just_set_addr = true;
-    //             {
-    //                 // start_new_run
-    //                 ranges.push(run_start_addr..current_addr);
-    //                 run_start_addr = offset as u32;
-    //             }
-    //             current_addr = offset as u32;
-    //         }
-
-    //         if let Some(instr) = &line.instruction {
-    //             let bytes = match instr.inner.mnemonic.inner {
-    //                 "CONST" => continue,
-    //                 "DATA" => {
-    //                     if instr.inner.detail.operands.len() != 1 {
-    //                         panic!(
-    //                             "DATA instruction requires exactly 1 operand, but found {}",
-    //                             instr.inner.detail.operands.len()
-    //                         );
-    //                     }
-
-    //                     if instr.inner.detail.output.is_some() {
-    //                         panic!(
-    //                             "DATA instruction does not take a destination operand, but one was provided"
-    //                         );
-    //                     }
-
-    //                     let value = match &instr.inner.detail.operands[0].inner.core {
-    //                         CoreOperand::Constant(expr) => ctx.evaluate_constant_expr(&expr).unwrap_or_else(|err| panic!("Error evaluating constant expression for DATA at {:?}: {}", instr.span, err)),
-    //                         _ => panic!("Operand of DATA must be an immediate constant expression"),
-    //                     };
-
-    //                     cells[current_addr as usize] = Some((value, Some(instr.span)));
-    //                     current_addr += 1;
-    //                     prev_was_data = true;
-    //                     just_set_addr = false;
-    //                     continue
-    //                 }
-    //                 "MOV" => serialize_mov(&instr.inner.detail, &ctx),
-    //                 "HALT" => serialize_halt(&instr.inner.detail, &ctx),
-    //                 "NOP" => serialize_nop(&instr.inner.detail, &ctx),
-    //                 "ADDI" => serialize_addi(&instr.inner.detail, &ctx),
-    //                 "ADDF" => serialize_addf(&instr.inner.detail, &ctx),
-    //                 "OR" => serialize_or(&instr.inner.detail, &ctx),
-    //                 "AND" => serialize_and(&instr.inner.detail, &ctx),
-    //                 "XOR" => serialize_xor(&instr.inner.detail, &ctx),
-    //                 "ROT" => serialize_rot(&instr.inner.detail, &ctx),
-    //                 "JMP" => serialize_jmp(&instr.inner.detail, &ctx),
-    //                 "JMPEQ" => serialize_jmpeq(&instr.inner.detail, &ctx),
-    //                 "JMPNE" => serialize_jmpne(&instr.inner.detail, &ctx),
-    //                 "JMPGE" => serialize_jmpge(&instr.inner.detail, &ctx),
-    //                 "JMPLE" => serialize_jmple(&instr.inner.detail, &ctx),
-    //                 "JMPGT" => serialize_jmpgt(&instr.inner.detail, &ctx),
-    //                 "JMPLT" => serialize_jmplt(&instr.inner.detail, &ctx),
-    //                 _ => panic!("Unknown instruction mnemonic: {}", instr.inner.mnemonic.inner),
-    //             }.unwrap_or_else(|err| panic!("Error serializing instruction at {:?}: {}", instr.span, err));
-
-    //             if prev_was_data && !just_set_addr {
-    //                 {
-    //                     // start_new_run:
-    //                     ranges.push(run_start_addr..current_addr);
-    //                     current_addr = align(current_addr, 0);
-    //                     run_start_addr = current_addr;
-    //                 }
-    //             } else {
-    //                 current_addr = align(current_addr, run_start_addr % INSTRUCTION_ALIGNMENT);
-    //             }
-
-    //             cells[current_addr as usize] = Some((bytes[0], Some(instr.span)));
-    //             cells[current_addr as usize + 1] = Some((bytes[1], None));
-    //             current_addr += INSTRUCTION_SIZE;
-
-    //             println!(
-    //                 "Serialized instruction at {:?} to bytes: {:02X} {:02X}",
-    //                 instr.span, bytes[0], bytes[1]
-    //             );
-
-    //             prev_was_data = false;
-    //             just_set_addr = false;
-    //         }
-    //     }
-    //     ranges.push(run_start_addr..current_addr);
-    // }
-
     let mut result = vec![];
 
     for segment in segments {
@@ -774,7 +683,10 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
         while i < segment.len() {
             let (addr, instr) = &segment[i];
             let serialized = serialize_instruction(instr, &ctx).unwrap_or_else(|err| {
-                panic!("Error serializing instruction at {:?}: {}", instr.span, err)
+                panic!(
+                    "Error serializing instruction at {:?}: {}",
+                    instr.span, err.message
+                )
             });
 
             match serialized {
@@ -790,7 +702,7 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
                         segment.get(i + 1).map(|(next_addr, instr)| {
                             assert!(*next_addr == *addr + 1, "Expected consecutive data bytes at address {}, but found non-consecutive address {}", addr, next_addr);
                              match serialize_instruction(instr, &ctx).unwrap_or_else(|err| {
-                                    panic!("Error serializing instruction at {:?}: {}", instr.span, err)
+                                    panic!("Error serializing instruction at {:?}: {}", instr.span, err.message)
                              }) {
                             SerializedInstruction::Data(next_byte) => (next_byte, Some(instr.span)),
                             _ => panic!("Expected next instruction to be DATA for consecutive data bytes at address {}, but it was not", next_addr),
@@ -863,7 +775,10 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
             ..
         }) => {
             if let Some(resolved) = constants.get(symbol) {
-                eprintln!("Using already resolved constant {} with value {}", symbol, resolved);
+                eprintln!(
+                    "Using already resolved constant {} with value {}",
+                    symbol, resolved
+                );
                 *resolved
             } else if let Some(pending_expr) = pending_constants.get(symbol) {
                 if stack.contains(symbol) {
