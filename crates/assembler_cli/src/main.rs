@@ -24,7 +24,7 @@ fn main() {
     };
 
     let lines = brookshear_assembly::parser::parse_asm_file(&file);
-    let output = brookshear_assembly::instructions::serialize_program_from_text_to_text(&lines, &file);
+    let output = brookshear_assembly::instructions::serialize_program_from_text_to_text(&lines, &file).unwrap();
 
     if cli.output == *"-" {
         print!("{}", output);

@@ -47,9 +47,8 @@ impl<'a> Context<'a> {
             }) => self
                 .constants
                 .get(symbol)
-                .map(|val| {
+                .inspect(|&val| {
                     eprintln!("Evaluating constant {} with value {}", symbol, val);
-                    val
                 })
                 .cloned()
                 .ok_or_else(|| {
@@ -68,7 +67,7 @@ impl<'a> Context<'a> {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum SerializationErrorMessage {
+pub enum SerializationErrorMessage {
     #[error("Instruction requires exactly {expected} operands, but found {found}")]
     UnexpectedOperandCount { expected: usize, found: usize },
     #[error("Instruction does not take a destination operand, but one was provided")]
@@ -81,6 +80,10 @@ enum SerializationErrorMessage {
     InvalidOperand(String),
     #[error("Undefined constant: {0}")]
     UndefinedConstant(String),
+    #[error("Cyclic dependency detected in constant evaluation: {}", .0.join(" -> "))]
+    CyclicDependency(Vec<String>),
+    #[error("Unknown instruction mnemonic: {0}")]
+    UnknownMnemonic(String),
     #[error("{0}")]
     UnknownError(String),
 }
@@ -95,12 +98,12 @@ impl SerializationErrorMessage {
 }
 
 #[derive(Debug)]
-struct SerializationError {
-    message: SerializationErrorMessage,
-    span: Option<SimpleSpan>,
+pub struct SerializationError {
+    pub message: SerializationErrorMessage,
+    pub span: Option<SimpleSpan>,
 }
 
-type SerializeResult<T> = Result<T, SerializationError>;
+pub type SerializeResult<T> = Result<T, SerializationError>;
 
 fn assert_operands<'src, 'a, const EXPECTED: usize>(
     detail: &'a InstructionDetail<'src>,
@@ -371,7 +374,7 @@ fn serialize_rot(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
         }
     };
 
-    Ok([0xA0 | *target_reg as u8, amount_constant as u8])
+    Ok([0xA0 | *target_reg as u8, amount_constant])
 }
 
 #[repr(u8)]
@@ -525,15 +528,13 @@ fn serialize_instruction<'a>(
                 assert_no_destination_operand(&instr.inner.detail)?;
 
                 let value = match &expr.inner.core {
-                    CoreOperand::Constant(expr) => {
-                        ctx.evaluate_constant_expr(expr).unwrap_or_else(|err| {
-                            panic!(
-                                "Error evaluating constant expression for DATA at {:?}: {}",
-                                instr.span, err.message
-                            )
-                        })
+                    CoreOperand::Constant(expr) => ctx.evaluate_constant_expr(expr)?,
+                    _ => {
+                        return Err(SerializationErrorMessage::InvalidOperand(
+                            "Operand of DATA must be an immediate constant expression".to_string(),
+                        )
+                        .with_span(Some(expr.span)));
                     }
-                    _ => panic!("Operand of DATA must be an immediate constant expression"),
                 };
 
                 return Ok(SerializedInstruction::Data(value));
@@ -554,15 +555,19 @@ fn serialize_instruction<'a>(
             "JMPLE" => serialize_jmple(&instr.inner.detail, ctx)?,
             "JMPGT" => serialize_jmpgt(&instr.inner.detail, ctx)?,
             "JMPLT" => serialize_jmplt(&instr.inner.detail, ctx)?,
-            _ => panic!(
-                "Unknown instruction mnemonic: {}",
-                instr.inner.mnemonic.inner
-            ),
+            _ => {
+                return Err(SerializationErrorMessage::UnknownMnemonic(
+                    instr.inner.mnemonic.inner.to_string(),
+                )
+                .with_span(Some(instr.mnemonic.span)));
+            }
         },
     ))
 }
 
-pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<SimpleSpan>); 2])> {
+pub fn serialize_program(
+    program: &[Spanned<Line>],
+) -> SerializeResult<Vec<(u8, [(u8, Option<SimpleSpan>); 2])>> {
     let mut waiting_labels = HashSet::new();
     let mut constants: HashMap<&str, u8> = HashMap::new();
     let mut pending_constants: HashMap<&str, &ConstantExpr> = HashMap::new();
@@ -596,15 +601,17 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
             if let Some(instr) = &line.instruction {
                 match instr.inner.mnemonic.inner {
                     "CONST" => {
-                        let [expr] = assert_operands(&instr.inner.detail)
-                            .unwrap_or_else(|err| panic!("{}", err.message));
-                        assert_no_destination_operand(&instr.inner.detail)
-                            .unwrap_or_else(|err| panic!("{}", err.message));
+                        let [expr] = assert_operands(&instr.inner.detail)?;
+                        assert_no_destination_operand(&instr.inner.detail)?;
 
                         let constant_expr = match &expr.inner.core {
                             CoreOperand::Constant(expr) => expr,
                             _ => {
-                                panic!("Operand of CONST must be an immediate constant expression")
+                                return Err(SerializationErrorMessage::InvalidOperand(
+                                    "Operand of CONST must be an immediate constant expression"
+                                        .to_string(),
+                                )
+                                .with_span(Some(expr.span)));
                             }
                         };
 
@@ -617,12 +624,13 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
                         for label in &waiting_labels {
                             constants.insert(
                                 *label,
-                                u8::try_from(current_addr).unwrap_or_else(|_| {
-                                    panic!(
+                                u8::try_from(current_addr).map_err(|_| {
+                                    SerializationErrorMessage::InvalidOperand(format!(
                                         "Address {} is too large to fit in a byte for constant {}",
                                         current_addr, label
-                                    )
-                                }),
+                                    ))
+                                    .with_span(Some(instr.mnemonic.span))
+                                })?,
                             );
                         }
                         waiting_labels.clear();
@@ -649,22 +657,25 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
                         for label in &waiting_labels {
                             constants.insert(
                                 *label,
-                                u8::try_from(current_addr).unwrap_or_else(|_| {
-                                    panic!(
+                                u8::try_from(current_addr).map_err(|_| {
+                                    SerializationErrorMessage::InvalidOperand(format!(
                                         "Address {} is too large to fit in a byte for constant {}",
                                         current_addr, label
-                                    )
-                                }),
+                                    ))
+                                    .with_span(Some(instr.mnemonic.span))
+                                })?,
                             );
                         }
                         waiting_labels.clear();
                         current_segment.push((current_addr, instr));
                         current_addr += INSTRUCTION_SIZE;
                     }
-                    _ => panic!(
-                        "Unknown instruction mnemonic: {}",
-                        instr.inner.mnemonic.inner
-                    ),
+                    _ => {
+                        return Err(SerializationErrorMessage::UnknownMnemonic(
+                            instr.inner.mnemonic.inner.to_string(),
+                        )
+                        .with_span(Some(instr.mnemonic.span)));
+                    }
                 }
                 just_set_addr = false;
             }
@@ -672,7 +683,7 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
         segments.push(current_segment);
     }
 
-    evaluate_pending_constants(&mut constants, &pending_constants);
+    evaluate_pending_constants(&mut constants, &pending_constants)?;
 
     let ctx = Context { constants };
 
@@ -682,12 +693,7 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
         let mut i = 0;
         while i < segment.len() {
             let (addr, instr) = &segment[i];
-            let serialized = serialize_instruction(instr, &ctx).unwrap_or_else(|err| {
-                panic!(
-                    "Error serializing instruction at {:?}: {}",
-                    instr.span, err.message
-                )
-            });
+            let serialized = serialize_instruction(instr, &ctx)?;
 
             match serialized {
                 SerializedInstruction::Code(bytes) => result.push((
@@ -701,12 +707,10 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
                         (byte, Some(instr.span)),
                         segment.get(i + 1).map(|(next_addr, instr)| {
                             assert!(*next_addr == *addr + 1, "Expected consecutive data bytes at address {}, but found non-consecutive address {}", addr, next_addr);
-                             match serialize_instruction(instr, &ctx).unwrap_or_else(|err| {
-                                    panic!("Error serializing instruction at {:?}: {}", instr.span, err.message)
-                             }) {
-                            SerializedInstruction::Data(next_byte) => (next_byte, Some(instr.span)),
-                            _ => panic!("Expected next instruction to be DATA for consecutive data bytes at address {}, but it was not", next_addr),
-                        }}).unwrap_or((0x00, None)),
+                             match serialize_instruction(instr, &ctx)? {
+                            SerializedInstruction::Data(next_byte) => Ok((next_byte, Some(instr.span))),
+                            _ => panic!("Expected next instruction to be DATA for consecutive data bytes at address {}, but it was not", next_addr), // true panic. this should never happen.
+                        }}).unwrap_or(Ok((0x00, None)))?,
                     ],
                 ));
                     i += 1;
@@ -716,14 +720,14 @@ pub fn serialize_program(program: &[Spanned<Line>]) -> Vec<(u8, [(u8, Option<Sim
         }
     }
 
-    result
+    Ok(result)
 }
 
 pub fn serialize_program_from_text_to_text(
     program: &[Spanned<Line>],
     program_text: &str,
-) -> String {
-    let serialized = serialize_program(program);
+) -> SerializeResult<String> {
+    let serialized = serialize_program(program)?;
     let mut result = String::new();
     for (addr, bytes) in serialized {
         let mut line = format!(
@@ -741,22 +745,27 @@ pub fn serialize_program_from_text_to_text(
         }
         result.push_str(&line);
     }
-    result
+    Ok(result)
 }
 
 fn evaluate_pending_constants<'a, 'b: 'a>(
     constants: &mut HashMap<&'a str, u8>,
     pending_constants: &HashMap<&'a str, &'b ConstantExpr<'a>>,
-) {
+) -> SerializeResult<()> {
     for (label, expr) in pending_constants {
         if constants.contains_key(label) {
             continue; // Already resolved
         }
         eprintln!("Evaluating constant {} with expression {:?}", label, expr);
-        let result =
-            recursively_evaluate_pending_constants(constants, pending_constants, vec![label], expr);
+        let result = recursively_evaluate_pending_constants(
+            constants,
+            pending_constants,
+            vec![label],
+            expr,
+        )?;
         constants.insert(*label, result);
     }
+    Ok(())
 }
 
 fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
@@ -764,12 +773,12 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
     pending_constants: &HashMap<&'a str, &'b ConstantExpr<'a>>,
     stack: Vec<&'a str>,
     current_expr: &'b ConstantExpr<'a>,
-) -> u8 {
+) -> SerializeResult<u8> {
     match current_expr {
         ConstantExpr::Fundamental(Spanned {
             inner: Constant::Literal(val),
             ..
-        }) => *val,
+        }) => Ok(*val),
         ConstantExpr::Fundamental(Spanned {
             inner: Constant::Symbolic(symbol),
             ..
@@ -779,15 +788,19 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
                     "Using already resolved constant {} with value {}",
                     symbol, resolved
                 );
-                *resolved
+                Ok(*resolved)
             } else if let Some(pending_expr) = pending_constants.get(symbol) {
                 if stack.contains(symbol) {
                     let index = stack.iter().position(|s| *s == *symbol).unwrap();
-                    panic!(
-                        "Cyclic dependency detected in constant definitions. Dependency chain: {:?} which ends up depending on {}",
-                        &stack[index..],
-                        symbol
-                    );
+                    return Err(SerializationErrorMessage::CyclicDependency(
+                        stack[index..]
+                            .iter()
+                            .cloned()
+                            .chain(std::iter::once(*symbol))
+                            .map(ToOwned::to_owned)
+                            .collect::<Vec<_>>(),
+                    )
+                    .with_span(None));
                 }
                 let mut new_stack = stack.clone();
                 new_stack.push(symbol);
@@ -796,26 +809,29 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
                     pending_constants,
                     new_stack,
                     pending_expr,
-                );
+                )?;
                 constants.insert(*symbol, res);
                 eprintln!("Resolved constant {} to value {}", symbol, res);
-                res
+                Ok(res)
             } else {
-                panic!("Undefined constant: {}", symbol);
+                Err(
+                    SerializationErrorMessage::UndefinedConstant(symbol.to_string())
+                        .with_span(None),
+                )
             }
         }
         ConstantExpr::Arithmetic {
             left,
             right,
             operator,
-        } => perform_arithmetic(left, right, *operator, |subexpr| {
-            Ok(recursively_evaluate_pending_constants(
+        } => Ok(perform_arithmetic(left, right, *operator, |subexpr| {
+            recursively_evaluate_pending_constants(
                 constants,
                 pending_constants,
                 stack.clone(),
                 subexpr,
-            ))
+            )
         })
-        .expect("Error evaluating constant expression"),
+        .expect("Error evaluating constant expression")),
     }
 }
