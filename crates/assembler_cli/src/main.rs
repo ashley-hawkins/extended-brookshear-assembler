@@ -6,7 +6,7 @@ use clap::Parser;
 struct Cli {
     #[clap(default_value = "-")]
     input: PathBuf,
-    #[clap(short, long, default_value = "-")]
+    #[clap(short = 'o', long, default_value = "-")]
     output: PathBuf,
 }
 

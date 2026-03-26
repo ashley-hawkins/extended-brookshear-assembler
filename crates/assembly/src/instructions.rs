@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ffi::os_str::Display,
-};
+use std::collections::{HashMap, HashSet};
 
 use chumsky::span::{SimpleSpan, Span, Spanned};
 
@@ -111,16 +108,18 @@ fn assert_operands<'src, 'a, const EXPECTED: usize>(
     <&'a [Spanned<Operand<'src>>; EXPECTED] as TryFrom<&'a [Spanned<Operand<'src>>]>>::try_from(
         detail.operands.as_ref(),
     )
-    .map_err(|e| {
+    .map_err(|_| {
         let found = detail.operands.len();
         SerializationErrorMessage::UnexpectedOperandCount {
             expected: EXPECTED,
             found,
         }
-        .with_span(Some(SimpleSpan::new(
-            (),
-            detail.operands.first().unwrap().span.start..detail.operands.last().unwrap().span.end,
-        )))
+        .with_span(detail.operands.first().and_then(|first| {
+            detail
+                .operands
+                .last()
+                .map(|last| first.span.union(last.span))
+        }))
     })
 }
 
@@ -148,8 +147,7 @@ fn assert_destination_operand<'src, 'a>(
 
 fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[u8; 2]> {
     let [src] = assert_operands(detail)?;
-
-    let dst = detail.output.as_ref().unwrap();
+    let dst = assert_destination_operand(detail)?;
 
     match (&src.inner, &dst.inner) {
         // 0x1rxy = load memory [xy] into register r
@@ -159,7 +157,7 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
                 core: CoreOperand::Constant(expr),
             },
             OutputOperand::Register(r),
-        ) => Ok([0x10 | **r as u8, ctx.evaluate_constant_expr(expr)?]),
+        ) => Ok([0x10 | r.as_index(), ctx.evaluate_constant_expr(expr)?]),
         // 0x2rxy = store value xy into register r
         (
             Operand {
@@ -167,7 +165,7 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
                 core: CoreOperand::Constant(expr),
             },
             OutputOperand::Register(r),
-        ) => Ok([0x20 | **r as u8, ctx.evaluate_constant_expr(expr)?]),
+        ) => Ok([0x20 | r.as_index(), ctx.evaluate_constant_expr(expr)?]),
         // 0x3rxy = store value in register r into memory [xy]
         (
             Operand {
@@ -175,7 +173,7 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
                 core: CoreOperand::Register(r),
             },
             OutputOperand::ConstantDeref(addr),
-        ) => Ok([0x30 | **r as u8, ctx.evaluate_constant_expr(addr)?]),
+        ) => Ok([0x30 | r.as_index(), ctx.evaluate_constant_expr(addr)?]),
         // 0x40rs = move value from register r to register s
         (
             Operand {
@@ -183,7 +181,7 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
                 core: CoreOperand::Register(src_r),
             },
             OutputOperand::Register(dst_r),
-        ) => Ok([0x40, ((**src_r as u8) << 4) | **dst_r as u8]),
+        ) => Ok([0x40, (src_r.as_index() << 4) | dst_r.as_index()]),
         // 0xD0rs = load [register s] into register r
         // TODO: alternative extended instruction set? 0x41rs?
         (
@@ -192,7 +190,7 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
                 core: CoreOperand::Register(dst_r),
             },
             OutputOperand::Register(src_r),
-        ) => Ok([0xD0, ((**dst_r as u8) << 4) | **src_r as u8]),
+        ) => Ok([0xD0, (dst_r.as_index() << 4) | src_r.as_index()]),
         // 0x42rs = store register r into [register s]
         // TODO: alternative extended instruction set? 0x42rs?
         (
@@ -201,7 +199,7 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
                 core: CoreOperand::Register(src_r),
             },
             OutputOperand::RegisterDeref(dst_r),
-        ) => Ok([0xE0, ((**src_r as u8) << 4) | **dst_r as u8]),
+        ) => Ok([0xE0, (src_r.as_index() << 4) | dst_r.as_index()]),
         // TODO: alternative extended instruction set? 0x43rs = load [register r] and store into [register s]
         // (
         //     Operand {
@@ -209,7 +207,7 @@ fn serialize_mov(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
         //         core: CoreOperand::Register(src_r),
         //     },
         //     OutputOperand::RegisterDeref(dst_r),
-        // ) => Ok([0x43, ((**src_r as u8) << 4) | **dst_r as u8]),
+        // ) => Ok([0x43, ((src_r.to_index() << 4) | dst_r.to_index())]),
         (
             Operand {
                 deref: true,
@@ -325,8 +323,8 @@ fn serialize_2regin_1regout(
     };
 
     Ok([
-        opcode | *dst_reg as u8,
-        (*src1reg as u8) << 4 | *src2reg as u8,
+        opcode | dst_reg.as_index(),
+        (src1reg.as_index() << 4) | src2reg.as_index(),
     ])
 }
 
@@ -374,9 +372,10 @@ fn serialize_rot(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<[
         }
     };
 
-    Ok([0xA0 | *target_reg as u8, amount_constant])
+    Ok([0xA0 | target_reg.as_index(), amount_constant])
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
 #[repr(u8)]
 enum CmpjmpOperator {
     Eq,
@@ -387,14 +386,20 @@ enum CmpjmpOperator {
     Lt,
 }
 
+impl CmpjmpOperator {
+    fn as_index(self) -> u8 {
+        self as u8
+    }
+}
+
 fn cmpjmp(
     target: Register,
     comparison_operand: Register,
     operator: CmpjmpOperator,
 ) -> SerializeResult<[u8; 2]> {
     Ok([
-        0xF0 | comparison_operand as u8,
-        (operator as u8) << 4 | target as u8,
+        0xF0 | comparison_operand.as_index(),
+        operator.as_index() << 4 | target.as_index(),
     ])
 }
 
@@ -409,7 +414,7 @@ fn jmpeq(
             core: CoreOperand::Constant(expr),
         } => {
             let addr = ctx.evaluate_constant_expr(expr)?;
-            Ok([0xB0 | comparison_operand as u8, addr])
+            Ok([0xB0 | comparison_operand.as_index(), addr])
         }
         Operand {
             deref: false,
@@ -692,21 +697,25 @@ pub fn serialize_program(
     for segment in segments {
         let mut i = 0;
         while i < segment.len() {
+            #[allow(clippy::indexing_slicing)] // i < segment.len() ensures this will not panic
             let (addr, instr) = &segment[i];
             let serialized = serialize_instruction(instr, &ctx)?;
 
+            let addr = u8::try_from(*addr).expect(
+                "Address should have been validated to fit in a byte when labels were resolved",
+            );
+
             match serialized {
-                SerializedInstruction::Code(bytes) => result.push((
-                    u8::try_from(*addr).unwrap(),
-                    [(bytes[0], Some(instr.span)), (bytes[1], None)],
-                )),
+                SerializedInstruction::Code(bytes) => {
+                    result.push((addr, [(bytes[0], Some(instr.span)), (bytes[1], None)]))
+                }
                 SerializedInstruction::Data(byte) => {
                     result.push((
-                    u8::try_from(*addr).unwrap(),
+                    addr,
                     [
                         (byte, Some(instr.span)),
                         segment.get(i + 1).map(|(next_addr, instr)| {
-                            assert!(*next_addr == *addr + 1, "Expected consecutive data bytes at address {}, but found non-consecutive address {}", addr, next_addr);
+                            assert!(*next_addr == addr as u32 + 1, "Expected consecutive data bytes at address {}, but found non-consecutive address {}", addr, next_addr);
                              match serialize_instruction(instr, &ctx)? {
                             SerializedInstruction::Data(next_byte) => Ok((next_byte, Some(instr.span))),
                             _ => panic!("Expected next instruction to be DATA for consecutive data bytes at address {}, but it was not", next_addr), // true panic. this should never happen.
@@ -790,9 +799,9 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
                 );
                 Ok(*resolved)
             } else if let Some(pending_expr) = pending_constants.get(symbol) {
-                if stack.contains(symbol) {
-                    let index = stack.iter().position(|s| *s == *symbol).unwrap();
+                if let Some(index) = stack.iter().position(|s| *s == *symbol) {
                     return Err(SerializationErrorMessage::CyclicDependency(
+                        #[allow(clippy::indexing_slicing)] // this index is guaranteed to be in bounds because it was obtained from position()
                         stack[index..]
                             .iter()
                             .cloned()
@@ -831,7 +840,6 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
                 stack.clone(),
                 subexpr,
             )
-        })
-        .expect("Error evaluating constant expression")),
+        })?),
     }
 }

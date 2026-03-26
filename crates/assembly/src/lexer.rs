@@ -1,5 +1,3 @@
-use std::error;
-
 use logos::{Filter, Logos};
 
 #[derive(Debug, PartialEq, Clone, Copy, Logos)]
@@ -41,8 +39,7 @@ pub enum AsmToken<'a> {
     #[regex(r"[0-9]{1,3}_d", callback = |lex| {
         let slice = lex.slice();
         let dec_str = &slice[..slice.len() - 2];
-        let res = dec_str.parse::<u8>().unwrap();
-        res
+        dec_str.parse::<u8>().unwrap()
     })]
     LiteralDec(u8),
     #[regex(r"[01]{8}|[01]{1,8}_b", callback = |lex| {
@@ -118,8 +115,15 @@ pub enum Register {
     RF,
 }
 
+impl Register {
+    pub fn as_index(self) -> u8 {
+        self as u8
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing)]
     use super::*;
 
     #[test]
