@@ -19,3 +19,9 @@ MOV c -> R1 // `c` can now be used the same as any other named constant, and thi
 ```
 
 It is a work in progress. It will have better error messages and usability once I've refactored everything to add complete exhaustive error handling and a GUI.
+
+### TODO
+
+- Implement the "messages" panel.
+- Remove all panics that are expected to occur in normal operation of the program, replacing them with appropriate feedback to the user.
+- Add documentation, and replace all remaining TODOs in the UI itself.
