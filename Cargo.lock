@@ -528,6 +528,7 @@ dependencies = [
  "egui_extras",
  "env_logger",
  "futures",
+ "image",
  "js-sys",
  "log",
  "rfd",

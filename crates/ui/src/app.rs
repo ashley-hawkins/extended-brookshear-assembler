@@ -472,7 +472,10 @@ impl App {
                                     .on_hover_text("Save the bitmap display as a png file")
                                     .clicked()
                                 {
-                                    todo!()
+                                    helpers::render_and_save_image(
+                                        self.emulator_state.get_all_memory()[0x80..0x100].try_into().unwrap(),
+                                        "brookshear_display.png",
+                                    );
                                 }
                             });
                         });
