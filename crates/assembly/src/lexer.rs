@@ -1,5 +1,7 @@
 use logos::{Filter, Logos};
 
+use crate::common::Register;
+
 #[derive(Debug, PartialEq, Clone, Copy, Logos)]
 #[logos(subpattern single_whitespace = r"[ \t\n]")]
 #[logos(subpattern block_comment = r"/\*([^*]|\*+[^*/])*\*+/")]
@@ -10,25 +12,7 @@ use logos::{Filter, Logos};
     allow_greedy = true
 ))]
 pub enum AsmToken<'a> {
-    #[regex(r"R[0-9A-Fa-f]", |lex| match u8::from_str_radix(&lex.slice()[1..], 16).unwrap() {
-        0x0 => Register::R0,
-        0x1 => Register::R1,
-        0x2 => Register::R2,
-        0x3 => Register::R3,
-        0x4 => Register::R4,
-        0x5 => Register::R5,
-        0x6 => Register::R6,
-        0x7 => Register::R7,
-        0x8 => Register::R8,
-        0x9 => Register::R9,
-        0xA => Register::RA,
-        0xB => Register::RB,
-        0xC => Register::RC,
-        0xD => Register::RD,
-        0xE => Register::RE,
-        0xF => Register::RF,
-        _ => unreachable!(),
-    })]
+    #[regex(r"R[0-9A-Fa-f]", |lex| Register::from_repr(u8::from_str_radix(&lex.slice()[1..], 16).unwrap()).unwrap())]
     Register(Register),
     #[regex(r"[0-9A-Fa-f]{1,2}(_h)?", callback = |lex| {
         let slice = lex.slice();
@@ -91,33 +75,6 @@ fn handle_whitespace<'a>(lex: &mut logos::Lexer<'a, AsmToken<'a>>) -> Filter<()>
         Filter::Emit(())
     } else {
         Filter::Skip
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Copy, strum::FromRepr)]
-#[repr(u8)]
-pub enum Register {
-    R0,
-    R1,
-    R2,
-    R3,
-    R4,
-    R5,
-    R6,
-    R7,
-    R8,
-    R9,
-    RA,
-    RB,
-    RC,
-    RD,
-    RE,
-    RF,
-}
-
-impl Register {
-    pub fn as_index(self) -> u8 {
-        self as u8
     }
 }
 

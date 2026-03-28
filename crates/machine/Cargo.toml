@@ -1,5 +1,5 @@
 [package]
-name = "brookshear_assembler_cli"
+name = "machine"
 version = "0.1.0"
 edition = "2024"
 authors.workspace = true
@@ -7,4 +7,6 @@ license.workspace = true
 
 [dependencies]
 brookshear_assembly = { version = "0.1.0", path = "../assembly" }
-clap = { version = "4.6.0", features = ["derive"] }
+serde.workspace = true
+serde-big-array = "0.5.1"
+thiserror = "2.0.18"

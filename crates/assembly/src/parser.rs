@@ -7,7 +7,7 @@ use chumsky::{
 };
 use logos::Logos;
 
-use crate::lexer::{AsmToken as Token, Register};
+use crate::{common::Register, lexer::AsmToken as Token};
 
 pub trait Input<'a>: ValueInput<'a, Token = Token<'a>, Span = SimpleSpan> {}
 impl<'a, T: ValueInput<'a, Token = Token<'a>, Span = SimpleSpan>> Input<'a> for T {}
@@ -23,8 +23,6 @@ impl<'a, I: Input<'a>, O, P: ChumskyParser<'a, I, O, extra::Err<Error<'a>>> + Cl
     Parser<'a, I, O> for P
 {
 }
-
-type BoxedParser<'src, I, O> = chumsky::Boxed<'src, 'src, I, O, extra::Err<Error<'src>>>;
 
 #[derive(Logos, Debug, PartialEq)]
 pub enum Annotation<'a> {
