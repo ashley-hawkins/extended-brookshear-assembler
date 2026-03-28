@@ -508,10 +508,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "brookshear_machine"
+version = "0.1.0"
+dependencies = [
+ "brookshear_assembly",
+ "serde",
+ "serde-big-array",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "brookshear_ui"
 version = "0.1.0"
 dependencies = [
  "brookshear_assembly",
+ "brookshear_machine",
  "eframe",
  "egui",
  "egui_extras",
@@ -519,7 +530,6 @@ dependencies = [
  "futures",
  "js-sys",
  "log",
- "machine",
  "rfd",
  "serde",
  "wasm-bindgen-futures",
@@ -1969,16 +1979,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
 dependencies = [
  "logos-codegen",
-]
-
-[[package]]
-name = "machine"
-version = "0.1.0"
-dependencies = [
- "brookshear_assembly",
- "serde",
- "serde-big-array",
- "thiserror 2.0.18",
 ]
 
 [[package]]

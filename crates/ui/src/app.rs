@@ -4,9 +4,9 @@ use std::time;
 use web_time as time;
 
 use brookshear_assembly::common::Register;
+use brookshear_machine::{BrookshearMachine, float8_to_string, string_to_float8};
 use egui::{Align, Button, Frame, Label, Layout, RadioButton, ScrollArea, Slider, TextEdit};
 use egui_extras::{Column, Size, StripBuilder};
-use machine::{BrookshearMachine, float8_to_string, string_to_float8};
 
 use crate::helpers::{self, open_file};
 
@@ -29,6 +29,8 @@ enum PendingFileType {
 #[derive(serde::Deserialize, serde::Serialize, Default)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct App {
+    message: String,
+    emulator_instructions_executed: u64,
     emulator_state: BrookshearMachine,
     emulator_next_action: EmulatorAction,
     display_on: bool,
@@ -83,15 +85,29 @@ impl App {
         res
     }
 
-    fn step(&mut self) {
+    fn schedule_step(&mut self) {
         self.last_instruction_time = None;
         self.duration_to_account_for = time::Duration::ZERO;
         self.emulator_next_action = EmulatorAction::Step;
         self.update_pc_text_buffer();
     }
 
-    fn unstep(&mut self) {
+    fn schedule_unstep(&mut self) {
         todo!()
+    }
+
+    fn do_step(&mut self) -> Result<bool, brookshear_machine::BrookshearMachineError> {
+        let res = self.emulator_state.step();
+        if let Ok(true) = res {
+            self.emulator_instructions_executed += 1;
+            self.message = format!(
+                "Instructions executed: {}",
+                self.emulator_instructions_executed
+            );
+        }
+        self.update_pc_text_buffer();
+        self.highlighted_row = self.emulator_state.get_pc();
+        res
     }
 
     fn cont(&mut self) {
@@ -523,6 +539,7 @@ impl App {
                                     .clicked()
                                 {
                                     self.emulator_state.reset_registers();
+                                    self.emulator_instructions_executed = 0;
                                     self.update_pc_text_buffer();
                                     self.highlighted_row = self.emulator_state.get_pc();
                                 }
@@ -889,6 +906,8 @@ impl eframe::App for App {
                         .clicked()
                     {
                         self.emulator_state.reset_registers();
+                        self.emulator_instructions_executed = 0;
+                        self.update_pc_text_buffer();
                         self.cont();
                     }
                     ui.add_space(10.0);
@@ -910,17 +929,22 @@ impl eframe::App for App {
                     }
                     ui.add_space(10.0);
                     if ui.add_sized([w, 20.0], Button::new("Undo Step")).clicked() {
-                        self.unstep()
+                        self.schedule_unstep()
                     }
                     ui.add_space(10.0);
                     if ui.add_sized([w, 20.0], Button::new("Step")).clicked() {
-                        self.step();
+                        self.schedule_step();
                     }
                     ui.heading("CPU Controls");
                     Frame::group(ui.style()).show(ui, |ui| {
-                        ui.allocate_ui(ui.available_size(), |ui| {
-                            ui.take_available_space();
-                        });
+                        ui.allocate_ui_with_layout(
+                            ui.available_size(),
+                            Layout::top_down(Align::LEFT),
+                            |ui| {
+                                ui.label(&self.message);
+                                ui.take_available_space();
+                            },
+                        );
                     });
                 });
             });
@@ -966,7 +990,7 @@ impl eframe::App for App {
                 while self.duration_to_account_for.as_secs_f64() >= period.as_secs_f64() {
                     self.duration_to_account_for -= period;
 
-                    match self.emulator_state.step() {
+                    match self.do_step() {
                         Ok(true) => {} // continue running
                         Ok(false) => {
                             self.pause();
@@ -976,20 +1000,16 @@ impl eframe::App for App {
                             self.pause();
                         }
                     }
-                    self.update_pc_text_buffer();
-                    self.highlighted_row = self.emulator_state.get_pc();
                 }
             }
             EmulatorAction::Step => {
-                match self.emulator_state.step() {
+                match self.do_step() {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("Emulator error: {:?}", e);
                     }
                 }
                 self.pause();
-                self.update_pc_text_buffer();
-                self.highlighted_row = self.emulator_state.get_pc();
             }
             EmulatorAction::Idle => {}
         }
