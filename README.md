@@ -31,6 +31,14 @@ It is a work in progress. It will have better error messages and usability once 
 
 ### TODO
 
-- Implement the "messages" panel.
+- Clean up the UI code and extract any repetitive code into functions.
 - Remove all panics that are expected to occur in normal operation of the program, replacing them with appropriate feedback to the user.
-- Add documentation, and replace all remaining TODOs in the UI itself.
+- Add documentation (info, instructions, help, etc), and replace all remaining TODOs in the UI itself.
+- Implement 'undo' functionality.
+
+Maybe:
+
+- Button to clear the display?
+- Button to load an image into the display?
+- A way to uncap the speed of the emulator?
+- A way to lock the display so you don't accidentally modify it by clicking on it

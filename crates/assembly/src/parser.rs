@@ -99,18 +99,18 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
         Token::LiteralBin(lit) => lit
     }
     .labelled("numeric literal");
-    let ident = select! { Token::Identifier(ident) => ident };
-    let label = ident.then_ignore(just(Token::Colon));
-    let offset = literal.then_ignore(just(Token::Colon));
+    let ident = select! { Token::Identifier(ident) => ident }.labelled("identifier");
+    let label = ident.then_ignore(just(Token::Colon)).labelled("label");
+    let offset = literal.then_ignore(just(Token::Colon)).labelled("offset");
 
     let annotation =
-        choice((label.map(Annotation::Label), offset.map(Annotation::Offset))).spanned();
+        choice((label.map(Annotation::Label), offset.map(Annotation::Offset))).spanned().labelled("annotation");
 
     let constant = choice((
         literal.map(Constant::Literal),
         ident.map(Constant::Symbolic),
     ))
-    .spanned();
+    .spanned().labelled("constant");
 
     let constant_expression = recursive(|constant_expr| {
         let atom = choice((
@@ -208,7 +208,7 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
     .spanned();
 
     let instr = ident
-        .spanned()
+        .spanned().labelled("instruction mnemonic")
         .then(
             operand
                 .separated_by(just(Token::Comma))

@@ -5,3 +5,4 @@ pub mod lexer;
 pub mod parser;
 pub mod structured_instruction;
 pub mod common;
+pub mod errors;

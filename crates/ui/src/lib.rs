@@ -2,4 +2,5 @@
 
 mod app;
 pub mod helpers;
+pub mod ansi;
 pub use app::App;

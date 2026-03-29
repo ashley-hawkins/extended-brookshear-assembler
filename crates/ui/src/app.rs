@@ -3,12 +3,18 @@ use std::time;
 #[cfg(target_arch = "wasm32")]
 use web_time as time;
 
-use brookshear_assembly::common::Register;
+use brookshear_assembly::{
+    common::Register,
+    errors::{parse_errors_to_string, semantic_errors_to_string},
+};
 use brookshear_machine::{BrookshearMachine, float8_to_string, string_to_float8};
 use egui::{Align, Button, Frame, Label, Layout, RadioButton, ScrollArea, Slider, TextEdit};
 use egui_extras::{Column, Size, StripBuilder};
 
-use crate::helpers::{self, open_file};
+use crate::{
+    ansi::MyRichText,
+    helpers::{self, open_file},
+};
 
 #[derive(Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 enum EmulatorAction {
@@ -29,7 +35,11 @@ enum PendingFileType {
 #[derive(serde::Deserialize, serde::Serialize, Default)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct App {
+    #[serde(skip)]
     message: String,
+    #[serde(skip)]
+    message_rich_text: Option<MyRichText>,
+
     emulator_instructions_executed: u64,
     emulator_state: BrookshearMachine,
     emulator_next_action: EmulatorAction,
@@ -64,6 +74,7 @@ pub struct App {
     about_window_open: bool,
     help_window_open: bool,
     assembler_help_window_open: bool,
+    message_rich_text_window_open: bool,
 }
 
 impl App {
@@ -93,7 +104,7 @@ impl App {
     }
 
     fn schedule_unstep(&mut self) {
-        todo!()
+        self.message = "Unstepping is not implemented yet, sorry.".to_string();
     }
 
     fn do_step(&mut self) -> Result<bool, brookshear_machine::BrookshearMachineError> {
@@ -839,6 +850,33 @@ impl App {
             });
     }
 
+    fn render_message_rich_text_window(&mut self, ui: &mut egui::Ui) {
+        if self.message_rich_text.is_none() {
+            self.message_rich_text_window_open = false;
+        }
+        egui::Window::new("Message Details")
+            .open(&mut self.message_rich_text_window_open)
+            .resizable(true)
+            .collapsible(false)
+            .default_width(400.0)
+            .default_height(300.0)
+            .show(ui.ctx(), |ui| {
+                ScrollArea::both()
+                    .auto_shrink(egui::Vec2b::FALSE)
+                    .show(ui, |ui| {
+                        if let Some(rich_text) = &self.message_rich_text {
+                            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                            ui.style_mut().visuals.override_text_color = Some(crate::ansi::WHITE);
+                            let job = rich_text.layout(ui.style());
+                            let galley = ui.fonts_mut(|f| f.layout_job(job));
+                            ui.label(galley);
+                        } else {
+                            ui.label("No details available.");
+                        }
+                    });
+            });
+    }
+
     fn handle_pending_file(&mut self) {
         (|| {
             if let Some((kind, handle)) = &mut self.pending_file
@@ -857,14 +895,36 @@ impl App {
                                 };
                                 let program =
                                     brookshear_assembly::parser::parse_asm_file(file_contents)
-                                        .map_err(|err| {
-                                            format!("Failed to parse assembly: {err:?}")
+                                        .inspect_err(|e| {
+                                            self.message_rich_text =
+                                                Some(crate::ansi::ansi_to_rich_text(
+                                                    &parse_errors_to_string(
+                                                        file_contents,
+                                                        "<input file>".to_string(),
+                                                        e,
+                                                    ),
+                                                ));
+                                        })
+                                        .map_err(|_| {
+                                            "Failed to parse assembly, click to see details."
+                                                .to_string()
                                         })?;
                                 let result =
                                     brookshear_assembly::serialize::serialize_program_to_binary(
                                         &program,
                                     )
-                                    .map_err(|err| format!("Failed to process program: {err}"))?;
+                                    .map_err(|err| {
+                                        self.message_rich_text =
+                                            Some(crate::ansi::ansi_to_rich_text(
+                                                &semantic_errors_to_string(
+                                                    file_contents,
+                                                    "<input file>".to_string(),
+                                                    &[err],
+                                                ),
+                                            ));
+                                        "Failed to process program. Click to see details."
+                                            .to_string()
+                                    })?;
                                 self.emulator_state.load_memory(result);
                             }
                             PendingFileType::LoadMemory => {
@@ -880,19 +940,37 @@ impl App {
                             PendingFileType::AssembleToFile => {
                                 let file_contents =
                                     &str::from_utf8(&file_contents).map_err(|_| {
-                                        "Failed to parse file contents as UTF-8".to_string()
+                                        "File does not contain valid UTF-8. Only UTF-8 encoded files are supported.".to_string()
                                     })?;
                                 let program =
                                     brookshear_assembly::parser::parse_asm_file(file_contents)
                                         .map_err(|e| {
-                                            format!("Failed to parse assembly file: {e:?}")
+                                            self.message_rich_text =
+                                                Some(crate::ansi::ansi_to_rich_text(
+                                                    &parse_errors_to_string(
+                                                        file_contents,
+                                                        "<input file>".to_string(),
+                                                        &e,
+                                                    ),
+                                                ));
+                                            "Failed to parse assembly file, click to see details."
+                                                .to_string()
                                         })?;
-
                                 let result =
                                     brookshear_assembly::serialize::serialize_program_to_binary(
                                         &program,
                                     )
-                                    .map_err(|err| format!("Failed to process program: {err}"))?;
+                                    .map_err(|err| {
+                                        self.message_rich_text =
+                                            Some(crate::ansi::ansi_to_rich_text(
+                                                &semantic_errors_to_string(
+                                                    file_contents,
+                                                    "<input file>".to_string(),
+                                                    &[err],
+                                                ),
+                                            ));
+                                        "Failed to process program. Click to see details.".to_string()
+                                    })?;
                                 helpers::save_file(result.to_vec(), "Untitled Program.bin");
                             }
                         }
@@ -925,6 +1003,7 @@ impl eframe::App for App {
         self.render_instructions_window(ui);
         self.render_help_window(ui);
         self.render_assembler_help_window(ui);
+        self.render_message_rich_text_window(ui);
 
         egui::Panel::right("right_panel")
             .resizable(false)
@@ -1014,16 +1093,31 @@ impl eframe::App for App {
                         self.schedule_step();
                     }
                     ui.heading("CPU Controls");
-                    Frame::group(ui.style()).show(ui, |ui| {
-                        ui.allocate_ui_with_layout(
-                            ui.available_size(),
-                            Layout::top_down(Align::LEFT),
-                            |ui| {
-                                ui.label(&self.message);
-                                ui.take_available_space();
-                            },
-                        );
-                    });
+                    let frame_rect = Frame::group(ui.style())
+                        .show(ui, |ui| {
+                            ui.allocate_ui_with_layout(
+                                ui.available_size(),
+                                Layout::top_down(Align::LEFT),
+                                |ui| {
+                                    ui.label(&self.message);
+                                    ui.take_available_space();
+                                },
+                            )
+                        })
+                        .inner
+                        .response
+                        .rect;
+                    if ui
+                        .interact(
+                            frame_rect,
+                            "msgbox".into(),
+                            egui::Sense::click() | egui::Sense::hover(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        self.message_rich_text_window_open = true;
+                    };
                 });
             });
         egui::CentralPanel::default().show_inside(ui, |ui| {

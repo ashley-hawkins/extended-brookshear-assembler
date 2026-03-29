@@ -511,6 +511,7 @@ dependencies = [
 name = "brookshear_assembly"
 version = "0.1.0"
 dependencies = [
+ "ariadne",
  "chumsky",
  "logos",
  "strum",
@@ -531,7 +532,7 @@ dependencies = [
 name = "brookshear_ui"
 version = "0.1.0"
 dependencies = [
- "ariadne",
+ "anstyle-parse",
  "brookshear_assembly",
  "brookshear_machine",
  "eframe",

@@ -69,6 +69,32 @@ pub enum AsmToken<'a> {
     Unrecognized,
 }
 
+impl std::fmt::Display for AsmToken<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AsmToken::Register(reg) => write!(f, "{:?}", *reg),
+            AsmToken::LiteralHex(lit) => write!(f, "{:02X}_h", lit),
+            AsmToken::LiteralDec(lit) => write!(f, "{}_d", lit),
+            AsmToken::LiteralBin(lit) => write!(f, "{:08b}_b", lit),
+            AsmToken::Identifier(ident) | AsmToken::Ambiguous(ident) => write!(f, "{}", ident),
+            AsmToken::Add => write!(f, "+"),
+            AsmToken::Subtract => write!(f, "-"),
+            AsmToken::Multiply => write!(f, "*"),
+            AsmToken::Divide => write!(f, "/"),
+            AsmToken::Modulo => write!(f, "%"),
+            AsmToken::Into => write!(f, "->"),
+            AsmToken::Comma => write!(f, ","),
+            AsmToken::LeftBracket => write!(f, "["),
+            AsmToken::RightBracket => write!(f, "]"),
+            AsmToken::LeftParen => write!(f, "("),
+            AsmToken::RightParen => write!(f, ")"),
+            AsmToken::Colon => write!(f, ":"),
+            AsmToken::Newline => write!(f, "\\n"),
+            AsmToken::Unrecognized => write!(f, "<unrecognized>"),
+        }
+    }
+}
+
 fn handle_whitespace<'a>(lex: &mut logos::Lexer<'a, AsmToken<'a>>) -> Filter<()> {
     let slice = lex.slice();
     if slice.contains('\n') {
