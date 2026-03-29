@@ -103,14 +103,16 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
     let label = ident.then_ignore(just(Token::Colon)).labelled("label");
     let offset = literal.then_ignore(just(Token::Colon)).labelled("offset");
 
-    let annotation =
-        choice((label.map(Annotation::Label), offset.map(Annotation::Offset))).spanned().labelled("annotation");
+    let annotation = choice((label.map(Annotation::Label), offset.map(Annotation::Offset)))
+        .spanned()
+        .labelled("annotation");
 
     let constant = choice((
         literal.map(Constant::Literal),
         ident.map(Constant::Symbolic),
     ))
-    .spanned().labelled("constant");
+    .spanned()
+    .labelled("constant");
 
     let constant_expression = recursive(|constant_expr| {
         let atom = choice((
@@ -208,7 +210,8 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
     .spanned();
 
     let instr = ident
-        .spanned().labelled("instruction mnemonic")
+        .spanned()
+        .labelled("instruction mnemonic")
         .then(
             operand
                 .separated_by(just(Token::Comma))
@@ -229,7 +232,7 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
         });
 
     line.spanned()
-        .separated_by(just(Token::Newline))
+        .separated_by(just(Token::Newline).labelled("newline"))
         .allow_leading()
         .allow_trailing()
         .collect()
@@ -238,16 +241,18 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
 pub fn parse_asm_file<'a>(
     input: &'a str,
 ) -> Result<Vec<Spanned<Line<'a>>>, Vec<chumsky::error::Rich<'a, Token<'a>, SimpleSpan>>> {
-    let tokens = Token::lexer(input)
-        .spanned()
-        .map(|(tok, span)| match tok {
-            Ok(tok) => Ok((tok, SimpleSpan::new((), span))),
-            Err(e) => Err(e),
-        })
-        .map(|res| match res {
-            Ok((tok, span)) => (tok, span),
-            Err(()) => (Token::Unrecognized, SimpleSpan::new((), 0..0)),
-        });
+    let mut lexer = Token::lexer(input).spanned();
+
+    let tokens = std::iter::from_fn(move || {
+        let raw_tok = lexer.next();
+
+        raw_tok
+            .map(|(tok, span)| tok.map(|tok| (tok, SimpleSpan::new((), span))))
+            .map(|res| match res {
+                Ok((tok, span)) => (tok, span),
+                Err(()) => (Token::Error, SimpleSpan::new((), lexer.span())),
+            })
+    });
 
     let parser = instruction_parser();
     let stream = chumsky::input::Stream::from_iter(tokens).map(

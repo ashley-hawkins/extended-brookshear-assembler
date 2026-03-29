@@ -31,7 +31,7 @@ It is a work in progress. It will have better error messages and usability once 
 
 ### TODO
 
-- Clean up the UI code and extract any repetitive code into functions.
+- Clean up the UI code and extract any repetitive code into functions. Especially message-related code.
 - Remove all panics that are expected to occur in normal operation of the program, replacing them with appropriate feedback to the user.
 - Add documentation (info, instructions, help, etc), and replace all remaining TODOs in the UI itself.
 - Implement 'undo' functionality.

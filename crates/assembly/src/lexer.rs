@@ -35,7 +35,7 @@ pub enum AsmToken<'a> {
     #[regex(r"[A-Za-z_][A-Za-z0-9_][A-Za-gi-z0-9_]|[A-Za-z_][A-Za-z0-9_]{3,}")]
     Identifier(&'a str),
     // Catch anything that could've been a numeric or identifier but wasn't matched by the above patterns
-    #[regex(r"[A-Za-z0-9_]+", priority = 0)]
+    #[regex(r"[A-Za-z0-9_]+", priority = 1)]
     Ambiguous(&'a str),
     #[token("+")]
     Add,
@@ -66,7 +66,9 @@ pub enum AsmToken<'a> {
         handle_whitespace
     )]
     Newline,
-    Unrecognized,
+    #[regex(r".", priority = 0, callback = |lex| lex.slice().chars().next().unwrap())]
+    Unrecognized(char),
+    Error,
 }
 
 impl std::fmt::Display for AsmToken<'_> {
@@ -90,7 +92,8 @@ impl std::fmt::Display for AsmToken<'_> {
             AsmToken::RightParen => write!(f, ")"),
             AsmToken::Colon => write!(f, ":"),
             AsmToken::Newline => write!(f, "\\n"),
-            AsmToken::Unrecognized => write!(f, "<unrecognized>"),
+            AsmToken::Unrecognized(c) => write!(f, "{:?}", c),
+            AsmToken::Error => write!(f, "<error>"),
         }
     }
 }
