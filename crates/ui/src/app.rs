@@ -864,9 +864,7 @@ impl App {
                                     brookshear_assembly::serialize::serialize_program_to_binary(
                                         &program,
                                     )
-                                    .map_err(|err| {
-                                        format!("Failed to process program: {err}")
-                                    })?;
+                                    .map_err(|err| format!("Failed to process program: {err}"))?;
                                 self.emulator_state.load_memory(result);
                             }
                             PendingFileType::LoadMemory => {
@@ -894,9 +892,7 @@ impl App {
                                     brookshear_assembly::serialize::serialize_program_to_binary(
                                         &program,
                                     )
-                                    .map_err(|err| {
-                                        format!("Failed to process program: {err}")
-                                    })?;
+                                    .map_err(|err| format!("Failed to process program: {err}"))?;
                                 helpers::save_file(result.to_vec(), "Untitled Program.bin");
                             }
                         }
@@ -906,7 +902,8 @@ impl App {
             }
 
             Ok(())
-        })().unwrap_or_else(|err| {
+        })()
+        .unwrap_or_else(|err| {
             eprintln!("Error handling file: {err}");
             self.pending_file = None;
             self.message = err;
@@ -1003,9 +1000,9 @@ impl eframe::App for App {
                         )
                         .clicked()
                     {
-                        self.emulator_next_action = match self.emulator_next_action {
-                            EmulatorAction::Continue => EmulatorAction::Idle,
-                            _ => EmulatorAction::Continue,
+                        match self.emulator_next_action {
+                            EmulatorAction::Continue => self.pause(),
+                            _ => self.cont(),
                         }
                     }
                     ui.add_space(10.0);
