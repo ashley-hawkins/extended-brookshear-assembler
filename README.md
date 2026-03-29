@@ -23,11 +23,12 @@ It is a work in progress. It will have better error messages and usability once 
 ## Improvements - GUI Emulator
 
 - Uses the improved assembler
-- Has more detailed error messages (WIP, will be expanded and improved further)
+- Has more detailed error messages
 - Parses and encodes floating point values properly
 - You can click on a pixel in the bit-mapped display to toggle its corresponding bit.
 - Saving the bit-mapped display as as an image gives you a 32x32 png - a pixel-for-pixel representation of the display, rather than giving a stretched or warped version based on the current resolution of the window.
 - The speed of execution is clearly communicated (instructions per second) rather than a 0-100 slider of unexplained units
+- Runs in a web browser, and can be installed as a PWA
 
 ### TODO
 
