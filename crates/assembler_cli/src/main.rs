@@ -23,8 +23,9 @@ fn main() {
         std::fs::read_to_string(&cli.input).expect("Failed to read input file")
     };
 
-    let lines = brookshear_assembly::parser::parse_asm_file(&file);
-    let output = brookshear_assembly::serialize::serialize_program_from_text_to_text(&lines, &file).unwrap();
+    let lines = brookshear_assembly::parser::parse_asm_file(&file).unwrap();
+    let output =
+        brookshear_assembly::serialize::serialize_program_from_text_to_text(&lines, &file).unwrap();
 
     if cli.output == *"-" {
         print!("{}", output);

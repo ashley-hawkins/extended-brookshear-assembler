@@ -28,16 +28,17 @@ eframe = { version = "0.34.1", default-features = false, features = [
 serde.workspace = true
 rfd = "0.17.2"
 futures = "0.3.32"
-web-time = "1.1.0"
-js-sys = "0.3.92"
+ariadne = "0.6.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.11.8"
-image = {version = "0.25.10", default-features = false, features = ["png"]}
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4.50"
+web-time = "1.1.0"
+js-sys = "0.3.92"
 web-sys = "0.3.70"              # to access the DOM (to hide the loading text)
 log = "0.4.27"

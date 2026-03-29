@@ -51,7 +51,7 @@ impl<'a> Context<'a> {
                 .cloned()
                 .ok_or_else(|| {
                     SerializationErrorMessage::UndefinedConstant(symbol.to_string())
-                        .with_span(Some(expr.span))
+                        .with_span(expr.span)
                 }),
             ConstantExpr::Arithmetic {
                 left,
@@ -82,12 +82,16 @@ pub enum SerializationErrorMessage {
     CyclicDependency(Vec<String>),
     #[error("Unknown instruction mnemonic: {0}")]
     UnknownMnemonic(String),
+    #[error(
+        "Exceeded memory limit of 256 bytes. This instruction would be placed at address {0}, which is out of bounds."
+    )]
+    MemoryLimitExceeded(u32),
     #[error("{0}")]
     UnknownError(String),
 }
 
 impl SerializationErrorMessage {
-    pub fn with_span(self, span: Option<SimpleSpan>) -> SerializationError {
+    pub fn with_span(self, span: SimpleSpan) -> SerializationError {
         SerializationError {
             message: self,
             span,
@@ -98,7 +102,13 @@ impl SerializationErrorMessage {
 #[derive(Debug)]
 pub struct SerializationError {
     pub message: SerializationErrorMessage,
-    pub span: Option<SimpleSpan>,
+    pub span: SimpleSpan,
+}
+
+impl std::fmt::Display for SerializationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} at span {:?}", self.message, self.span)
+    }
 }
 
 pub type SerializeResult<T> = Result<T, SerializationError>;
@@ -171,7 +181,7 @@ pub fn serialize_program(
                                     "Operand of CONST must be an immediate constant expression"
                                         .to_string(),
                                 )
-                                .with_span(Some(expr.span)));
+                                .with_span(expr.span));
                             }
                         };
 
@@ -189,7 +199,7 @@ pub fn serialize_program(
                                         "Address {} is too large to fit in a byte for constant {}",
                                         current_addr, label
                                     ))
-                                    .with_span(Some(instr.mnemonic.span))
+                                    .with_span(instr.mnemonic.span)
                                 })?,
                             );
                         }
@@ -222,7 +232,7 @@ pub fn serialize_program(
                                         "Address {} is too large to fit in a byte for constant {}",
                                         current_addr, label
                                     ))
-                                    .with_span(Some(instr.mnemonic.span))
+                                    .with_span(instr.mnemonic.span)
                                 })?,
                             );
                         }
@@ -234,7 +244,7 @@ pub fn serialize_program(
                         return Err(SerializationErrorMessage::UnknownMnemonic(
                             instr.inner.mnemonic.inner.to_string(),
                         )
-                        .with_span(Some(instr.mnemonic.span)));
+                        .with_span(instr.mnemonic.span));
                     }
                 }
                 just_set_addr = false;
@@ -256,9 +266,9 @@ pub fn serialize_program(
             let (addr, instr) = &segment[i];
             let serialized = serialize_instruction(instr, &ctx)?;
 
-            let addr = u8::try_from(*addr).expect(
-                "Address should have been validated to fit in a byte when labels were resolved",
-            );
+            let addr = u8::try_from(*addr).map_err(|_| {
+                SerializationErrorMessage::MemoryLimitExceeded(*addr).with_span(instr.mnemonic.span)
+            })?;
 
             match serialized {
                 SerializedInstruction::Code(bytes) => {
@@ -312,14 +322,14 @@ pub fn serialize_program_from_text_to_text(
     Ok(result)
 }
 
-pub fn serialize_program_to_binary(
-    program: &[Spanned<Line>],
-) -> SerializeResult<[u8; 256]> {
+pub fn serialize_program_to_binary(program: &[Spanned<Line>]) -> SerializeResult<[u8; 256]> {
     let serialized = serialize_program(program)?;
     let mut result = [0u8; 256];
     for (addr, bytes) in serialized {
         result[addr as usize] = bytes[0].0;
-        result[addr as usize + 1] = bytes[1].0;
+        if let Some(b) = result.get_mut(addr as usize + 1) {
+            *b = bytes[1].0
+        };
     }
     Ok(result)
 }
@@ -357,7 +367,7 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
         }) => Ok(*val),
         ConstantExpr::Fundamental(Spanned {
             inner: Constant::Symbolic(symbol),
-            ..
+            span,
         }) => {
             if let Some(resolved) = constants.get(symbol) {
                 eprintln!(
@@ -377,7 +387,7 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
                             .map(ToOwned::to_owned)
                             .collect::<Vec<_>>(),
                     )
-                    .with_span(None));
+                    .with_span(*span));
                 }
                 let mut new_stack = stack.clone();
                 new_stack.push(symbol);
@@ -393,7 +403,7 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
             } else {
                 Err(
                     SerializationErrorMessage::UndefinedConstant(symbol.to_string())
-                        .with_span(None),
+                        .with_span(*span),
                 )
             }
         }

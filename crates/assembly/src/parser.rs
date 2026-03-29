@@ -39,7 +39,7 @@ pub struct Line<'a> {
 #[derive(Debug)]
 pub struct Instruction<'a> {
     pub mnemonic: Spanned<&'a str>,
-    pub detail: InstructionDetail<'a>,
+    pub detail: Spanned<InstructionDetail<'a>>,
 }
 
 #[derive(Debug)]
@@ -174,7 +174,7 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
             fold_binary_operation,
         );
 
-        atom.pratt((multiply_div_mod_operation, add_sub_operation,))
+        atom.pratt((multiply_div_mod_operation, add_sub_operation))
     });
 
     let register = select! { Token::Register(reg) => reg }
@@ -209,15 +209,15 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
 
     let instr = ident
         .spanned()
-        .then(operand.separated_by(just(Token::Comma)).collect())
-        .then(just(Token::Into).ignore_then(into_operand).or_not())
-        .map(|((mnemonic, operands), into)| Instruction {
-            mnemonic,
-            detail: InstructionDetail {
-                operands,
-                output: into,
-            },
-        })
+        .then(
+            operand
+                .separated_by(just(Token::Comma))
+                .collect()
+                .then(just(Token::Into).ignore_then(into_operand).or_not())
+                .map(|(operands, output)| InstructionDetail { operands, output })
+                .spanned(),
+        )
+        .map(|(mnemonic, detail)| Instruction { mnemonic, detail })
         .spanned();
 
     let line = annotation
@@ -235,8 +235,10 @@ fn instruction_parser<'src, I: Input<'src>>() -> impl Parser<'src, I, Vec<Spanne
         .collect()
 }
 
-pub fn parse_asm_file<'a>(input: &'a str) -> Vec<Spanned<Line<'a>>> {
-    let tokens  = Token::lexer(input)
+pub fn parse_asm_file<'a>(
+    input: &'a str,
+) -> Result<Vec<Spanned<Line<'a>>>, Vec<chumsky::error::Rich<'a, Token<'a>, SimpleSpan>>> {
+    let tokens = Token::lexer(input)
         .spanned()
         .map(|(tok, span)| match tok {
             Ok(tok) => Ok((tok, SimpleSpan::new((), span))),
@@ -257,5 +259,5 @@ pub fn parse_asm_file<'a>(input: &'a str) -> Vec<Spanned<Line<'a>>> {
     for err in res.errors() {
         eprintln!("Parse error: {:?}", err);
     }
-    res.into_output().unwrap()
+    res.into_result()
 }

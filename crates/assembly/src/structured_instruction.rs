@@ -84,7 +84,7 @@ impl StructuredInstruction {
             _ => Err(SerializationErrorMessage::UnknownMnemonic(
                 instr.inner.mnemonic.inner.to_string(),
             )
-            .with_span(Some(instr.mnemonic.span))),
+            .with_span(instr.mnemonic.span)),
         }
     }
 
@@ -405,10 +405,10 @@ impl StructuredInstruction {
 }
 
 pub(crate) fn assert_operands<'src, 'a, const EXPECTED: usize>(
-    detail: &'a InstructionDetail<'src>,
+    detail: &'a Spanned<InstructionDetail<'src>>,
 ) -> SerializeResult<&'a [Spanned<Operand<'src>>; EXPECTED]> {
     <&'a [Spanned<Operand<'src>>; EXPECTED] as TryFrom<&'a [Spanned<Operand<'src>>]>>::try_from(
-        detail.operands.as_ref(),
+        detail.inner.operands.as_ref(),
     )
     .map_err(|_| {
         let found = detail.operands.len();
@@ -416,39 +416,47 @@ pub(crate) fn assert_operands<'src, 'a, const EXPECTED: usize>(
             expected: EXPECTED,
             found,
         }
-        .with_span(detail.operands.first().and_then(|first| {
+        .with_span(
             detail
                 .operands
-                .last()
-                .map(|last| first.span.union(last.span))
-        }))
+                .first()
+                .and_then(|first| {
+                    detail
+                        .operands
+                        .last()
+                        .map(|last| first.span.union(last.span))
+                })
+                .unwrap_or(detail.span),
+        )
     })
 }
 
-pub(crate) fn assert_no_operands(detail: &InstructionDetail) -> SerializeResult<()> {
+pub(crate) fn assert_no_operands(detail: &Spanned<InstructionDetail>) -> SerializeResult<()> {
     assert_operands::<0>(detail).map(drop)
 }
 
-pub(crate) fn assert_no_destination_operand(detail: &InstructionDetail) -> SerializeResult<()> {
-    if let Some(output) = detail.output.as_ref() {
-        Err(SerializationErrorMessage::UnexpectedDestinationOperand.with_span(Some(output.span)))
+pub(crate) fn assert_no_destination_operand(
+    detail: &Spanned<InstructionDetail>,
+) -> SerializeResult<()> {
+    if let Some(output) = detail.inner.output.as_ref() {
+        Err(SerializationErrorMessage::UnexpectedDestinationOperand.with_span(output.span))
     } else {
         Ok(())
     }
 }
 
 pub(crate) fn assert_destination_operand<'src, 'a>(
-    detail: &'a InstructionDetail<'src>,
+    detail: &'a Spanned<InstructionDetail<'src>>,
 ) -> SerializeResult<&'a Spanned<OutputOperand<'src>>> {
     if let Some(output) = detail.output.as_ref() {
         Ok(output)
     } else {
-        Err(SerializationErrorMessage::MissingDestinationOperand.with_span(None))
+        Err(SerializationErrorMessage::MissingDestinationOperand.with_span(detail.span))
     }
 }
 
 fn convert_mov(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     let [src] = assert_operands(detail)?;
@@ -540,7 +548,7 @@ fn convert_mov(
         ) => Err(SerializationErrorMessage::InvalidOperandCombination(
             "MOV [Rr] -> [Rr] is not supported.".to_string(),
         )
-        .with_span(Some(src.span.union(dst.span)))),
+        .with_span(src.span.union(dst.span))),
         (
             Operand {
                 deref: false,
@@ -550,7 +558,7 @@ fn convert_mov(
         ) => Err(SerializationErrorMessage::InvalidOperandCombination(
             "MOV xy -> [Rr] is not supported.".to_string(),
         )
-        .with_span(Some(src.span.union(dst.span)))),
+        .with_span(src.span.union(dst.span))),
         (
             Operand {
                 deref: true,
@@ -560,7 +568,7 @@ fn convert_mov(
         ) => Err(SerializationErrorMessage::InvalidOperandCombination(
             "MOV [xy] -> [Rr] is not supported.".to_string(),
         )
-        .with_span(Some(src.span.union(dst.span)))),
+        .with_span(src.span.union(dst.span))),
         (
             Operand {
                 deref: true,
@@ -570,7 +578,7 @@ fn convert_mov(
         ) => Err(SerializationErrorMessage::InvalidOperandCombination(
             "MOV [xy] -> [xy] is not supported.".to_string(),
         )
-        .with_span(Some(src.span.union(dst.span)))),
+        .with_span(src.span.union(dst.span))),
         (
             Operand {
                 deref: false,
@@ -580,7 +588,7 @@ fn convert_mov(
         ) => Err(SerializationErrorMessage::InvalidOperandCombination(
             "MOV xy -> [xy] is not supported.".to_string(),
         )
-        .with_span(Some(src.span.union(dst.span)))),
+        .with_span(src.span.union(dst.span))),
         (
             Operand {
                 deref: true,
@@ -590,12 +598,12 @@ fn convert_mov(
         ) => Err(SerializationErrorMessage::InvalidOperandCombination(
             "MOV [Rr] -> [xy] is not supported.".to_string(),
         )
-        .with_span(Some(src.span.union(dst.span)))),
+        .with_span(src.span.union(dst.span))),
     }
 }
 
 fn convert_halt(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     _ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     assert_no_operands(detail)?;
@@ -605,7 +613,7 @@ fn convert_halt(
 }
 
 fn convert_nop(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     _ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     assert_no_operands(detail)?;
@@ -615,7 +623,7 @@ fn convert_nop(
 }
 
 fn convert_2regin_1regout(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     _ctx: &Context,
     opcode: u8,
 ) -> SerializeResult<StructuredInstruction> {
@@ -628,7 +636,7 @@ fn convert_2regin_1regout(
             return Err(SerializationErrorMessage::InvalidOperand(
                 "Source operands must be registers".to_string(),
             )
-            .with_span(Some(src1.span)));
+            .with_span(src1.span));
         }
     };
     let src2reg = match src2.inner.core {
@@ -637,7 +645,7 @@ fn convert_2regin_1regout(
             return Err(SerializationErrorMessage::InvalidOperand(
                 "Second source operand must be a register".to_string(),
             )
-            .with_span(Some(src2.span)));
+            .with_span(src2.span));
         }
     };
 
@@ -647,7 +655,7 @@ fn convert_2regin_1regout(
             return Err(SerializationErrorMessage::InvalidOperand(
                 "Destination operand must be a register".to_string(),
             )
-            .with_span(Some(dst.span)));
+            .with_span(dst.span));
         }
     };
 
@@ -662,39 +670,42 @@ fn convert_2regin_1regout(
 }
 
 fn convert_addi(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_2regin_1regout(detail, ctx, 0x50)
 }
 
 fn convert_addf(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_2regin_1regout(detail, ctx, 0x60)
 }
 
-fn convert_or(detail: &InstructionDetail, ctx: &Context) -> SerializeResult<StructuredInstruction> {
+fn convert_or(
+    detail: &Spanned<InstructionDetail>,
+    ctx: &Context,
+) -> SerializeResult<StructuredInstruction> {
     convert_2regin_1regout(detail, ctx, 0x70)
 }
 
 fn convert_and(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_2regin_1regout(detail, ctx, 0x80)
 }
 
 fn convert_xor(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_2regin_1regout(detail, ctx, 0x90)
 }
 
 fn convert_rot(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     let [target, amount] = assert_operands(detail)?;
@@ -706,7 +717,7 @@ fn convert_rot(
             return Err(SerializationErrorMessage::InvalidOperand(
                 "Target of ROT must be a register".to_string(),
             )
-            .with_span(Some(target.span)));
+            .with_span(target.span));
         }
     };
 
@@ -716,7 +727,7 @@ fn convert_rot(
             return Err(SerializationErrorMessage::InvalidOperand(
                 "Amount operand of ROT must be an immediate constant expression".to_string(),
             )
-            .with_span(Some(amount.span)));
+            .with_span(amount.span));
         }
     };
 
@@ -759,12 +770,12 @@ fn jmpeq(
             "Jump location of JMPEQ must be either a direct register or an immediate constant"
                 .to_string(),
         )
-        .with_span(Some(target.span))),
+        .with_span(target.span)),
     }
 }
 
 fn convert_jmp(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     let [jmp_location] = assert_operands(detail)?;
@@ -774,7 +785,7 @@ fn convert_jmp(
 }
 
 fn convert_jmpeq(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     let [jmp_location, comparison_operand] = assert_operands(detail)?;
@@ -789,7 +800,7 @@ fn convert_jmpeq(
             return Err(SerializationErrorMessage::InvalidOperand(
                 "Comparison operand of JMPEQ must be a direct register".to_string(),
             )
-            .with_span(Some(comparison_operand.span)));
+            .with_span(comparison_operand.span));
         }
     };
 
@@ -797,7 +808,7 @@ fn convert_jmpeq(
 }
 
 fn convert_cmpjmp(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     _ctx: &Context,
     operator: CmpjmpOperator,
 ) -> SerializeResult<StructuredInstruction> {
@@ -809,7 +820,9 @@ fn convert_cmpjmp(
             deref: false,
             core: CoreOperand::Register(r),
         } => r,
-        _ => return Err(SerializationErrorMessage::InvalidOperand("Jump location must be a direct register, except for JMP and JMPEQ which allow an immediate location".to_string()).with_span(Some(jmp_location.span))),
+        _ => return Err(SerializationErrorMessage::InvalidOperand(
+            "Jump location must be a direct register, except for JMP and JMPEQ which allow an immediate location".to_string()
+        ).with_span(jmp_location.span)),
     };
 
     let comparison_operand_reg = match comparison_operand.inner {
@@ -821,7 +834,7 @@ fn convert_cmpjmp(
             return Err(SerializationErrorMessage::InvalidOperand(
                 "Comparison operand must be a direct register".to_string(),
             )
-            .with_span(Some(comparison_operand.span)));
+            .with_span(comparison_operand.span));
         }
     };
 
@@ -829,35 +842,35 @@ fn convert_cmpjmp(
 }
 
 fn convert_jmpne(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_cmpjmp(detail, ctx, CmpjmpOperator::Ne)
 }
 
 fn convert_jmpge(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_cmpjmp(detail, ctx, CmpjmpOperator::Ge)
 }
 
 fn convert_jmple(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_cmpjmp(detail, ctx, CmpjmpOperator::Le)
 }
 
 fn convert_jmpgt(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_cmpjmp(detail, ctx, CmpjmpOperator::Gt)
 }
 
 fn convert_jmplt(
-    detail: &InstructionDetail,
+    detail: &Spanned<InstructionDetail>,
     ctx: &Context,
 ) -> SerializeResult<StructuredInstruction> {
     convert_cmpjmp(detail, ctx, CmpjmpOperator::Lt)
@@ -887,7 +900,7 @@ pub fn convert_instruction<'a>(
                     return Err(SerializationErrorMessage::InvalidOperand(
                         "Operand of DATA must be an immediate constant expression".to_string(),
                     )
-                    .with_span(Some(expr.span)));
+                    .with_span(expr.span));
                 }
             };
 

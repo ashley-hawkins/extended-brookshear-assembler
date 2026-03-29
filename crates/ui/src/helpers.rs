@@ -1,3 +1,4 @@
+#[cfg(target_arch = "wasm32")]
 use js_sys::wasm_bindgen::{self, prelude::wasm_bindgen};
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -473,7 +473,9 @@ impl App {
                                     .clicked()
                                 {
                                     helpers::render_and_save_image(
-                                        self.emulator_state.get_all_memory()[0x80..0x100].try_into().unwrap(),
+                                        self.emulator_state.get_all_memory()[0x80..0x100]
+                                            .try_into()
+                                            .unwrap(),
                                         "brookshear_display.png",
                                     );
                                 }
@@ -836,6 +838,80 @@ impl App {
                 ui.label("TODO");
             });
     }
+
+    fn handle_pending_file(&mut self) {
+        (|| {
+            if let Some((kind, handle)) = &mut self.pending_file
+                && let Ok(file_result) = handle.try_recv()
+            {
+                let kind: PendingFileType = *kind;
+                match file_result {
+                    Some(file_contents) => {
+                        self.pending_file = None;
+                        match kind {
+                            PendingFileType::AssembleAndLoad => {
+                                let Ok(file_contents) = &str::from_utf8(&file_contents) else {
+                                    return Err(
+                                        "Failed to parse file contents as UTF-8".to_string()
+                                    );
+                                };
+                                let program =
+                                    brookshear_assembly::parser::parse_asm_file(file_contents)
+                                        .map_err(|err| {
+                                            format!("Failed to parse assembly: {err:?}")
+                                        })?;
+                                let result =
+                                    brookshear_assembly::serialize::serialize_program_to_binary(
+                                        &program,
+                                    )
+                                    .map_err(|err| {
+                                        format!("Failed to process program: {err}")
+                                    })?;
+                                self.emulator_state.load_memory(result);
+                            }
+                            PendingFileType::LoadMemory => {
+                                self.emulator_state.load_memory(
+                                    <[u8; 256]>::try_from(&file_contents[..]).map_err(|_| {
+                                        format!(
+                                            "File is the wrong size. Expected 256 bytes, got: {}",
+                                            file_contents.len()
+                                        )
+                                    })?,
+                                );
+                            }
+                            PendingFileType::AssembleToFile => {
+                                let file_contents =
+                                    &str::from_utf8(&file_contents).map_err(|_| {
+                                        "Failed to parse file contents as UTF-8".to_string()
+                                    })?;
+                                let program =
+                                    brookshear_assembly::parser::parse_asm_file(file_contents)
+                                        .map_err(|e| {
+                                            format!("Failed to parse assembly file: {e:?}")
+                                        })?;
+
+                                let result =
+                                    brookshear_assembly::serialize::serialize_program_to_binary(
+                                        &program,
+                                    )
+                                    .map_err(|err| {
+                                        format!("Failed to process program: {err}")
+                                    })?;
+                                helpers::save_file(result.to_vec(), "Untitled Program.bin");
+                            }
+                        }
+                    }
+                    None => { /* not received anything yet */ }
+                }
+            }
+
+            Ok(())
+        })().unwrap_or_else(|err| {
+            eprintln!("Error handling file: {err}");
+            self.pending_file = None;
+            self.message = err;
+        });
+    }
 }
 
 impl eframe::App for App {
@@ -899,9 +975,11 @@ impl eframe::App for App {
                         w - ui.spacing().interact_size.x - ui.spacing().button_padding.x * 2.0;
                     ui.add_sized(
                         [w, 20.0],
-                        Slider::new(&mut self.instructions_per_second, 0.5..=100.0)
+                        Slider::new(&mut self.instructions_per_second, 0.5..=200.0)
+                            .clamping(egui::SliderClamping::Never)
                             .logarithmic(true),
                     );
+                    self.instructions_per_second = self.instructions_per_second.clamp(0.5, 1000.0);
                     ui.label("Speed (instructions per second)");
                     ui.add_space(10.0);
                     if ui
@@ -1017,45 +1095,7 @@ impl eframe::App for App {
             EmulatorAction::Idle => {}
         }
 
-        if let Some((kind, handle)) = &mut self.pending_file
-            && let Ok(file_result) = handle.try_recv()
-        {
-            let kind = *kind;
-            match file_result {
-                Some(file_contents) => {
-                    self.pending_file = None;
-                    match kind {
-                        PendingFileType::AssembleAndLoad => {
-                            let file_contents = &str::from_utf8(&file_contents).unwrap();
-                            let program =
-                                brookshear_assembly::parser::parse_asm_file(file_contents);
-                            let result =
-                                brookshear_assembly::serialize::serialize_program_to_binary(
-                                    &program,
-                                )
-                                .unwrap();
-                            self.emulator_state.load_memory(result);
-                        }
-                        PendingFileType::LoadMemory => {
-                            self.emulator_state
-                                .load_memory(<[u8; 256]>::try_from(&file_contents[..]).unwrap());
-                        }
-                        PendingFileType::AssembleToFile => {
-                            let file_contents = &str::from_utf8(&file_contents).unwrap();
-                            let program =
-                                brookshear_assembly::parser::parse_asm_file(file_contents);
-                            let result =
-                                brookshear_assembly::serialize::serialize_program_to_binary(
-                                    &program,
-                                )
-                                .unwrap();
-                            helpers::save_file(result.to_vec(), "Untitled Program.bin");
-                        }
-                    }
-                }
-                None => { /* not received anything yet */ }
-            }
-        }
+        self.handle_pending_file();
 
         if self.emulator_next_action != EmulatorAction::Idle {
             ui.ctx().request_repaint();
