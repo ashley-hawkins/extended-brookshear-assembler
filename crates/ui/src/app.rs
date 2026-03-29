@@ -822,9 +822,44 @@ impl App {
                         "each of which is two bytes long. ",
                         "Some instructions are followed by one or two ",
                         "operand bytes, depending on the instruction. ",
-                        "The instruction set is as follows:"
+                        "The instruction set is as follows:",
                     ));
-                    ui.label("TODO");
+                    egui::Grid::new("instructions_grid").show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        for (name, description) in [
+                            ("0FFF", "No operation.."),
+                            ("1rxy", "Load memory[xy] into Rr."),
+                            ("2rxy", "Load value xy into Rr."),
+                            ("3rxy", "Store Rr into memory[xy]."),
+                            ("40rs", "Move Rr to Rs"),
+                            ("5rst", "Add as ints, Rs, Rt, put result in Rr"),
+                            ("6rst", "Add as floats, Rs, Rt, put result in Rr"),
+                            ("7rst", "OR each bit of Rs and Rt, put result in Rr"),
+                            ("8rst", "AND each bit of Rs and Rt, put result in Rr"),
+                            ("9rst", "XOR each bit of Rs and Rt, put result in Rr"),
+                            ("Ar0x", "Rotate Rr right by x bits"),
+                            ("Brxy", "Jump to address xy if Rr equals R0"),
+                            ("C000", "Halt"),
+                            ("D0rs", "Load Rr from memory[Rs]"),
+                            ("E0rs", "Store Rr in memory[Rs]"),
+                            (
+                                "Frxt",
+                                r#"Jump to address in Rt if Rr test R0
+x = 0 means test is equals
+x = 1 means test is not equals
+x = 2 means test is greater or equal
+x = 3 means test is less or equal
+x = 4 means test is greater than
+x = 5 means test is less than"#,
+                            ),
+                        ] {
+                            ui.vertical(|ui| {
+                                ui.label(name);
+                            });
+                            ui.label(description);
+                            ui.end_row();
+                        }
+                    });
                 });
             });
     }
