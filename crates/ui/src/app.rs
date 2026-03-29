@@ -1123,9 +1123,16 @@ impl eframe::App for App {
                         }
                     }
                     ui.add_space(10.0);
-                    if ui.add_sized([w, 20.0], Button::new("Undo Step")).clicked() {
-                        self.schedule_unstep()
-                    }
+                    ui.scope(|ui| {
+                        ui.disable();
+                        if ui
+                            .add_sized([w, 20.0], Button::new("Undo Step"))
+                            .on_hover_text("Sorry, this feature has not been implemented yet.")
+                            .clicked()
+                        {
+                            self.schedule_unstep()
+                        }
+                    });
                     ui.add_space(10.0);
                     if ui.add_sized([w, 20.0], Button::new("Step")).clicked() {
                         self.schedule_step();
