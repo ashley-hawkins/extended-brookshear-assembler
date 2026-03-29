@@ -792,13 +792,16 @@ impl App {
                 ui.vertical(|ui| {
                     ui.heading("Brookshear Machine Emulator");
                     ui.label("Created by Ashley Hawkins");
-                    ui.label("Source code available at:");
-                    ui.add(
-                        egui::Hyperlink::new(
-                            "https://github.com/ashley-hawkins/extended-brookshear-assembler",
-                        )
-                        .open_in_new_tab(true),
-                    );
+                    ui.label("UI layout and extended instructions are based on JBrookshearMachine by Milan Gritta");
+                    ui.horizontal(|ui| {
+                        ui.label("Source code available at:");
+                        ui.add(
+                            egui::Hyperlink::new(
+                                "https://github.com/ashley-hawkins/extended-brookshear-assembler",
+                            )
+                            .open_in_new_tab(true),
+                        );
+                    });
                     powered_by_egui_and_eframe(ui);
                 });
             });
