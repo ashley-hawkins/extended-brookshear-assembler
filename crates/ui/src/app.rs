@@ -1098,6 +1098,7 @@ impl eframe::App for App {
                     ui.add_space(10.0);
                     if ui
                         .add_sized([w, 20.0], Button::new("Reset & Run"))
+                        .on_hover_text("Reset registers and start running")
                         .clicked()
                     {
                         self.emulator_state.reset_registers();
@@ -1115,6 +1116,7 @@ impl eframe::App for App {
                                 "Continue"
                             }),
                         )
+                        .on_hover_text("Pause/resume execution")
                         .clicked()
                     {
                         match self.emulator_next_action {
@@ -1123,18 +1125,26 @@ impl eframe::App for App {
                         }
                     }
                     ui.add_space(10.0);
-                    ui.scope(|ui| {
-                        ui.disable();
-                        if ui
-                            .add_sized([w, 20.0], Button::new("Undo Step"))
-                            .on_hover_text("Sorry, this feature has not been implemented yet.")
-                            .clicked()
-                        {
-                            self.schedule_unstep()
-                        }
-                    });
+                    let rect = ui
+                        .scope(|ui| {
+                            ui.disable();
+                            let response = ui.add_sized([w, 20.0], Button::new("Undo Step"));
+                            if response.clicked() {
+                                self.schedule_unstep()
+                            }
+                            response
+                        })
+                        .inner
+                        .rect;
+                    ui.interact(rect, ui.id(), egui::Sense::hover())
+                        .on_hover_text("Sorry, this feature has not been implemented yet.");
+
                     ui.add_space(10.0);
-                    if ui.add_sized([w, 20.0], Button::new("Step")).clicked() {
+                    if ui
+                        .add_sized([w, 20.0], Button::new("Step"))
+                        .on_hover_text("Execute one step at a time")
+                        .clicked()
+                    {
                         self.schedule_step();
                     }
                     ui.heading("CPU Controls");
