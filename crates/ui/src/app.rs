@@ -1171,7 +1171,7 @@ impl eframe::App for App {
                             self.pause();
                         }
                         Err(e) => {
-                            eprintln!("Emulator error: {:?}", e);
+                            self.message = format!("Emulator error: {}", e);
                             self.pause();
                         }
                     }
@@ -1181,7 +1181,7 @@ impl eframe::App for App {
                 match self.do_step() {
                     Ok(_) => {}
                     Err(e) => {
-                        eprintln!("Emulator error: {:?}", e);
+                        self.message = format!("Emulator error: {}", e);
                     }
                 }
                 self.pause();

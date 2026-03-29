@@ -5,9 +5,9 @@ use brookshear_assembly::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum BrookshearMachineError {
-    #[error("Invalid instruction at address {0:#04X}: {1}")]
-    InvalidInstruction(u8, String),
-    #[error("Memory access out of bounds at address {0:#04X}")]
+    #[error("Invalid instruction at address {0:02X}: the bytes {first:02X} {second:02X} do not represent a valid instruction.", first = .1[0], second = .1[1])]
+    InvalidInstruction(u8, [u8; 2]),
+    #[error("Memory access out of bounds at address {0:02X}")]
     MemoryAccessOutOfBounds(u8),
     #[error("Reached end of memory without halting")]
     EndOfMemory,
@@ -94,22 +94,16 @@ impl BrookshearMachine {
         &mut self,
         address: u8,
     ) -> Result<StructuredInstruction, BrookshearMachineError> {
-        if address as usize >= self.memory.len() {
+        if address as usize >= self.memory.len() - 1 {
             return Err(BrookshearMachineError::EndOfMemory);
         }
         let instruction_bytes = [
             self.memory[address as usize],
-            self.memory[address.wrapping_add(1) as usize],
+            self.memory[address.checked_add(1).unwrap() as usize], // this should never overflow because of the check above. so unwrap is fine.
         ];
-        StructuredInstruction::from_bytes(instruction_bytes).ok_or_else(|| {
-            BrookshearMachineError::InvalidInstruction(
-                address,
-                format!(
-                    "Invalid instruction bytes: {:#04X} {:#04X}",
-                    instruction_bytes[0], instruction_bytes[1]
-                ),
-            )
-        })
+        StructuredInstruction::from_bytes(instruction_bytes).ok_or(
+            BrookshearMachineError::InvalidInstruction(address, instruction_bytes),
+        )
     }
 
     pub fn fetch_next_instruction(
