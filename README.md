@@ -36,6 +36,7 @@ It is a work in progress. It will have better error messages and usability once 
 - Remove all panics that are expected to occur in normal operation of the program, replacing them with appropriate feedback to the user.
 - Add documentation (info, instructions, help, etc), and replace all remaining TODOs in the UI itself.
 - Address certain edge cases in 'undo' (like when the user loads a new program or modifies registers/memory mid-run, the undo history should be invalidated).
+- Unit tests
 
 Maybe:
 
