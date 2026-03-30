@@ -21,12 +21,212 @@ pub enum ControlFlow {
 
 use serde_big_array::BigArray;
 
+#[cfg(feature = "undo")]
+mod undo {
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq, Clone)]
+    pub enum InverseSideEffect {
+        MemoryWrite { address: u8, old_value: u8 },
+        RegisterWrite { register: Register, old_value: u8 },
+    }
+
+    #[derive(Debug, PartialEq, Eq, Clone)]
+    pub struct InverseStep {
+        old_pc: u8,
+        side_effect: Option<InverseSideEffect>,
+    }
+
+    #[derive(Debug, PartialEq, Eq, Clone, Default)]
+    pub struct UndoHistory {
+        limit: usize,
+        entries: Vec<InverseStep>,
+    }
+
+    impl UndoHistory {
+        pub fn new(limit: usize) -> Self {
+            Self {
+                limit,
+                entries: Vec::new(),
+            }
+        }
+
+        pub fn push(&mut self, entry: InverseStep) {
+            if self.entries.len() == self.limit {
+                self.entries.remove(0);
+            }
+            self.entries.push(entry);
+        }
+
+        pub fn pop(&mut self) -> Option<InverseStep> {
+            self.entries.pop()
+        }
+
+        pub fn clear(&mut self) {
+            self.entries.clear();
+        }
+
+        pub fn set_limit(&mut self, new_limit: usize) {
+            self.limit = new_limit;
+            while self.entries.len() > self.limit {
+                self.entries.remove(0);
+            }
+        }
+
+        pub fn limit(&self) -> usize {
+            self.limit
+        }
+    }
+
+    impl BrookshearMachine {
+        pub fn new_with_history_limit(history_limit: usize) -> Self {
+            Self {
+                memory: [0; 256],
+                registers: [0; 16],
+                pc: 0,
+                undo_history: undo::UndoHistory::new(history_limit),
+            }
+        }
+
+        pub fn set_history_limit(&mut self, new_limit: usize) {
+            self.undo_history.set_limit(new_limit);
+        }
+
+        pub fn history_limit(&self) -> usize {
+            self.undo_history.limit
+        }
+
+        pub fn get_inverse_side_effect(
+            &self,
+            instruction: &StructuredInstruction,
+        ) -> Option<undo::InverseSideEffect> {
+            match instruction {
+                StructuredInstruction::MovMemToReg(addr, register) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *register,
+                        old_value: self.registers[register.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::MovImmToReg(_, register) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *register,
+                        old_value: self.registers[register.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::MovRegToMem(register, addr) => {
+                    Some(undo::InverseSideEffect::MemoryWrite {
+                        address: *addr,
+                        old_value: self.memory[*addr as usize],
+                    })
+                }
+                StructuredInstruction::MovRegToReg { src, dst } => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dst,
+                        old_value: self.registers[dst.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::MovIndirectToReg { dst, src } => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dst,
+                        old_value: self.registers[dst.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::MovRegToIndirect { src, dst } => {
+                    Some(undo::InverseSideEffect::MemoryWrite {
+                        address: self.registers[dst.as_index() as usize],
+                        old_value: self.memory[self.registers[dst.as_index() as usize] as usize],
+                    })
+                }
+                StructuredInstruction::AddRegToRegInteger(dest, operand1, operand2) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dest,
+                        old_value: self.registers[dest.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::AddRegToRegFloat(dest, operand1, operand2) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dest,
+                        old_value: self.registers[dest.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::OrRegToReg(dest, operand1, operand2) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dest,
+                        old_value: self.registers[dest.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::AndRegToReg(dest, operand1, operand2) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dest,
+                        old_value: self.registers[dest.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::XorRegToReg(dest, operand1, operand2) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dest,
+                        old_value: self.registers[dest.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::RotRegRight(dest, amount) => {
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register: *dest,
+                        old_value: self.registers[dest.as_index() as usize],
+                    })
+                }
+                StructuredInstruction::JmpIfEqual(dest, addr) => None,
+                StructuredInstruction::Halt => None,
+                StructuredInstruction::JumpWithComparison(_, _, _) => None,
+                StructuredInstruction::Nop => None,
+            }
+        }
+
+        pub fn get_inverse_step(&self, instruction: &StructuredInstruction) -> undo::InverseStep {
+            undo::InverseStep {
+                old_pc: self.pc,
+                side_effect: self.get_inverse_side_effect(instruction),
+            }
+        }
+
+        pub fn record_inverse_step(&mut self, instruction: &StructuredInstruction) {
+            if instruction == &StructuredInstruction::Halt {
+                // Halt doesn't really do anything at all, not even advance the PC, and it's not counted in the total instructions executed count.
+                return;
+            }
+            self.undo_history.push(self.get_inverse_step(instruction));
+        }
+
+        pub fn undo_step(&mut self) -> bool {
+            if let Some(entry) = self.undo_history.pop() {
+                self.pc = entry.old_pc;
+                match entry.side_effect {
+                    Some(undo::InverseSideEffect::MemoryWrite { address, old_value }) => {
+                        self.memory[address as usize] = old_value;
+                    }
+                    Some(undo::InverseSideEffect::RegisterWrite {
+                        register,
+                        old_value,
+                    }) => {
+                        self.registers[register.as_index() as usize] = old_value;
+                    }
+                    None => {}
+                }
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BrookshearMachine {
     pc: u8,
     registers: [u8; 16],
     #[serde(with = "BigArray")]
     memory: [u8; 256],
+    #[cfg(feature = "undo")]
+    #[serde(skip)]
+    undo_history: undo::UndoHistory,
 }
 
 impl BrookshearMachine {
@@ -38,6 +238,8 @@ impl BrookshearMachine {
             memory: [0; 256],
             registers: [0; 16],
             pc: 0,
+            #[cfg(feature = "undo")]
+            undo_history: undo::UndoHistory::new(0),
         }
     }
 
@@ -46,14 +248,25 @@ impl BrookshearMachine {
     }
 
     pub fn reset(&mut self) {
-        std::mem::take(self);
+        self.reset_memory();
+        self.reset_registers();
     }
 
     pub fn reset_memory(&mut self) {
+        #[cfg(feature = "undo")]
+        {
+            // The undo history is no longer valid after a reset.
+            self.undo_history.clear();
+        }
         self.memory = [0; 256];
     }
 
     pub fn reset_registers(&mut self) {
+        #[cfg(feature = "undo")]
+        {
+            // The undo history is no longer valid after a reset.
+            self.undo_history.clear();
+        }
         self.pc = 0;
         self.registers = [0; 16];
     }
@@ -116,6 +329,10 @@ impl BrookshearMachine {
         &mut self,
         instruction: StructuredInstruction,
     ) -> Result<ControlFlow, BrookshearMachineError> {
+        #[cfg(feature = "undo")]
+        {
+            self.record_inverse_step(&instruction);
+        }
         match instruction {
             StructuredInstruction::Nop => {}
             StructuredInstruction::MovMemToReg(addr, register) => {

@@ -22,6 +22,7 @@ enum EmulatorAction {
     Idle,
     Continue,
     Step,
+    Unstep,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -92,6 +93,8 @@ impl App {
             Default::default()
         };
 
+        // history entries are only 4 bytes so this is 4KB max
+        res.emulator_state.set_history_limit(1000);
         res.update_pc_text_buffer();
         res
     }
@@ -104,7 +107,7 @@ impl App {
     }
 
     fn schedule_unstep(&mut self) {
-        self.message = "Unstepping is not implemented yet, sorry.".to_string();
+        self.emulator_next_action = EmulatorAction::Unstep;
     }
 
     fn do_step(&mut self) -> Result<bool, brookshear_machine::BrookshearMachineError> {
@@ -119,6 +122,20 @@ impl App {
         self.update_pc_text_buffer();
         self.highlighted_row = self.emulator_state.get_pc();
         res
+    }
+
+    fn undo_step(&mut self) {
+        if self.emulator_state.undo_step() {
+            self.emulator_instructions_executed -= 1;
+            self.message = format!(
+                "Instructions executed: {}",
+                self.emulator_instructions_executed
+            );
+        } else {
+            self.message = "No more steps to undo.".to_string();
+        }
+        self.update_pc_text_buffer();
+        self.highlighted_row = self.emulator_state.get_pc();
     }
 
     fn cont(&mut self) {
@@ -1125,19 +1142,9 @@ impl eframe::App for App {
                         }
                     }
                     ui.add_space(10.0);
-                    let rect = ui
-                        .scope(|ui| {
-                            ui.disable();
-                            let response = ui.add_sized([w, 20.0], Button::new("Undo Step"));
-                            if response.clicked() {
-                                self.schedule_unstep()
-                            }
-                            response
-                        })
-                        .inner
-                        .rect;
-                    ui.interact(rect, ui.id(), egui::Sense::hover())
-                        .on_hover_text("Sorry, this feature has not been implemented yet.");
+                    if ui.add_sized([w, 20.0], Button::new("Undo Step")).clicked() {
+                        self.schedule_unstep();
+                    }
 
                     ui.add_space(10.0);
                     if ui
@@ -1236,6 +1243,10 @@ impl eframe::App for App {
                         self.message = format!("Emulator error: {}", e);
                     }
                 }
+                self.pause();
+            }
+            EmulatorAction::Unstep => {
+                self.undo_step();
                 self.pause();
             }
             EmulatorAction::Idle => {}

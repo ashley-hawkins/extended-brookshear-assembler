@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Clone, Copy, strum::FromRepr)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, strum::FromRepr)]
 #[repr(u8)]
 pub enum Register {
     R0,
