@@ -836,9 +836,9 @@ impl App {
                     ui.heading("Extended Brookshear Machine Instructions");
                     ui.label(concat!(
                         "The Extended Brookshear Machine has 16 instructions, ",
-                        "each of which is two bytes long. ",
-                        "Some instructions are followed by one or two ",
-                        "operand bytes, depending on the instruction. ",
+                        "having a fixed length of two bytes per instruction. ",
+                        "Those two bytes contain 1 nibble for the opcode, and ",
+                        "up to 3 nibbles for operands. ",
                         "The instruction set is as follows:",
                     ));
                     egui::Grid::new("instructions_grid").show(ui, |ui| {
