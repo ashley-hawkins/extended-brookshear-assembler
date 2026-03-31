@@ -25,7 +25,7 @@ async function cachedFetch(request) {
 /* Serve cached content when offline */
 self.addEventListener('fetch', function (e) {
   e.respondWith(
-    fetch(e.request).then(async function (response) {
+    fetch(e.request, { cache: "no-cache" }).then(async function (response) {
       if (!response) return await cachedFetch(e.request);
 
       if (response.ok) {
