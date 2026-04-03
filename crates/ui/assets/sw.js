@@ -43,6 +43,6 @@ self.addEventListener('fetch', function (e) {
       }
 
       return response;
-    }).catch(cachedFetch)
+    }).catch(() => cachedFetch(e.request))
   );
 });
