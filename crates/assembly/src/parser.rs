@@ -36,13 +36,13 @@ pub struct Line<'a> {
     pub instruction: Option<Spanned<Instruction<'a>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Instruction<'a> {
     pub mnemonic: Spanned<&'a str>,
     pub detail: Spanned<InstructionDetail<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Operand<'a> {
     pub deref: bool,
     pub core: CoreOperand<'a>,
@@ -57,13 +57,13 @@ pub enum ArithmeticOperator {
     Modulo,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstructionDetail<'a> {
     pub operands: Vec<Spanned<Operand<'a>>>,
     pub output: Option<Spanned<OutputOperand<'a>>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConstantExpr<'a> {
     Fundamental(Spanned<Constant<'a>>),
     Arithmetic {
@@ -73,20 +73,20 @@ pub enum ConstantExpr<'a> {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CoreOperand<'a> {
     Register(Spanned<Register>),
     Constant(Spanned<ConstantExpr<'a>>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OutputOperand<'a> {
     Register(Spanned<Register>),
     RegisterDeref(Spanned<Register>),
     ConstantDeref(Spanned<ConstantExpr<'a>>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Constant<'a> {
     Literal(u8),
     Symbolic(&'a str),

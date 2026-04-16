@@ -191,21 +191,25 @@ pub fn serialize_program(
                         waiting_labels.clear();
                     }
                     "DATA" => {
-                        for label in &waiting_labels {
-                            constants.insert(
-                                *label,
-                                u8::try_from(current_addr).map_err(|_| {
-                                    SerializationErrorMessage::InvalidOperand(format!(
-                                        "Address {} is too large to fit in a byte for constant {}",
-                                        current_addr, label
-                                    ))
-                                    .with_span(instr.mnemonic.span)
-                                })?,
-                            );
+                        for arg in instr.inner.detail.operands.iter() {
+                            for label in &waiting_labels {
+                                constants.insert(
+                                    *label,
+                                    u8::try_from(current_addr).map_err(|_| {
+                                        SerializationErrorMessage::InvalidOperand(format!(
+                                            "Address {} is too large to fit in a byte for constant {}",
+                                            current_addr, label
+                                        ))
+                                        .with_span(instr.mnemonic.span)
+                                    })?,
+                                );
+                            }
+                            waiting_labels.clear();
+                            let mut fake_instr = (*instr).clone();
+                            fake_instr.inner.detail.operands = vec![(*arg).clone()];
+                            current_segment.push((current_addr, fake_instr));
+                            current_addr += 1;
                         }
-                        waiting_labels.clear();
-                        current_segment.push((current_addr, instr));
-                        current_addr += 1;
                         prev_was_data = true;
                     }
                     "MOV" | "HALT" | "NOP" | "ADDI" | "ADDF" | "AND" | "OR" | "XOR" | "ROT"
@@ -237,7 +241,7 @@ pub fn serialize_program(
                             );
                         }
                         waiting_labels.clear();
-                        current_segment.push((current_addr, instr));
+                        current_segment.push((current_addr, (*instr).clone()));
                         current_addr += INSTRUCTION_SIZE;
                     }
                     _ => {
