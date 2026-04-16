@@ -512,9 +512,9 @@ fn convert_mov(
         (
             Operand {
                 deref: true,
-                core: CoreOperand::Register(dst_r),
+                core: CoreOperand::Register(src_r),
             },
-            OutputOperand::Register(src_r),
+            OutputOperand::Register(dst_r),
         ) => Ok(StructuredInstruction::MovIndirectToReg {
             dst: **dst_r,
             src: **src_r,
