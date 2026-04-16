@@ -3,7 +3,7 @@ use logos::{Filter, Logos};
 use crate::common::Register;
 
 #[derive(Debug, PartialEq, Clone, Copy, Logos)]
-#[logos(subpattern single_whitespace = r"[ \t\n]")]
+#[logos(subpattern single_whitespace = r"[ \t\r\n]")]
 #[logos(subpattern block_comment = r"/\*([^*]|\*+[^*/])*\*+/")]
 #[logos(subpattern line_comment = r"//[^\n]*")]
 #[logos(skip(

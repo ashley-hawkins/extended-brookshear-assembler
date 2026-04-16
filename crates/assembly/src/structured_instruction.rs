@@ -64,7 +64,7 @@ impl StructuredInstruction {
         instr: &Spanned<crate::parser::Instruction<'_>>,
         ctx: &Context,
     ) -> SerializeResult<Self> {
-        match instr.inner.mnemonic.inner {
+        match instr.inner.mnemonic.inner.to_uppercase().as_str() {
             "MOV" => convert_mov(&instr.inner.detail, ctx),
             "HALT" => convert_halt(&instr.inner.detail, ctx),
             "NOP" => convert_nop(&instr.inner.detail, ctx),
@@ -886,7 +886,7 @@ pub fn convert_instruction<'a>(
     instr: &Spanned<crate::parser::Instruction<'a>>,
     ctx: &Context,
 ) -> SerializeResult<ConvertedInstruction> {
-    let res: ConvertedInstruction = ConvertedInstruction::Code(match instr.inner.mnemonic.inner {
+    let res: ConvertedInstruction = ConvertedInstruction::Code(match instr.inner.mnemonic.inner.to_uppercase().as_str() {
         "CONST" => {
             unreachable!("CONST should have been skipped in an earlier pass.");
         }

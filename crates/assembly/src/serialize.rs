@@ -169,7 +169,7 @@ pub fn serialize_program(
             }
 
             if let Some(instr) = &line.instruction {
-                match instr.inner.mnemonic.inner {
+                match instr.inner.mnemonic.inner.to_uppercase().as_str() {
                     "CONST" => {
                         let [expr] = assert_operands(&instr.inner.detail)?;
                         assert_no_destination_operand(&instr.inner.detail)?;
