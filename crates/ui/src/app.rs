@@ -917,8 +917,9 @@ x = 5 means test is less than"#,
             .default_width(400.0)
             .default_height(300.0)
             .show(ui.ctx(), |ui| {
+                *ui.style_mut() = ui.ctx().options(|o| (*o.dark_style).clone());
                 Frame::group(ui.style())
-                    .fill(egui::Color32::from_gray(10))
+                    .fill(egui::Color32::from_gray(20))
                     .show(ui, |ui| {
                         ScrollArea::both()
                             .auto_shrink(egui::Vec2b::FALSE)
