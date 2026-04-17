@@ -30,10 +30,10 @@ pub fn write_parse_errors<'src>(
                 found: Some(inner_found),
             } => {
                 match **inner_found {
-                    AsmToken::Ambiguous(ambig) => format!("Encountered ambiguous token: '{:?}'", ambig),
+                    AsmToken::Ambiguous(ambig) => format!("Encountered ambiguous token: '{}'", ambig),
                     other_token => 
                     format!(
-                        "Encountered unexpected token '{}'",
+                        "Encountered unexpected token: '{}'",
                         other_token,
                     )
             }}
@@ -57,10 +57,12 @@ pub fn write_parse_errors<'src>(
             } => match (expected, **found) {
                 (_, AsmToken::Ambiguous(ambig)) => {
                     if C_STYLE_HEX_RE.is_match(ambig) {
-                        Some(format!("This token, \"{}\", looks like a C-style hexadecimal number. Hexadecimal numbers are written with no prefix, or optionally with the suffix _h, e.g. {}_h", ambig, &ambig[2..]))
-                    } else  {
+                        Some(format!("This token, \'{}\', looks like a C-style hexadecimal number. Hexadecimal numbers are written with no prefix, or optionally with the suffix _h, e.g. {}_h", ambig, &ambig[2..]))
+                    } else if ambig.chars().all(|c| c.is_ascii_digit()) {
+                        Some(format!("This token, \'{}\', entirely consists of digits, but it is not a valid number because it is too large.", ambig))
+                    } else {
                         Some(
-                            format!("This token, \"{}\", is ambiguous due to the fact that it contains characters that could be used\nin either a number or an identifier (such as a label), but it could not be determined which was\nintended. Usually this happens as a result of writing an identifier that starts with a digit\nsuch as \"0hello\" which is unfortunately not supported.", ambig),
+                            format!("This token, \'{}\', is ambiguous due to the fact that it contains characters that could be used\nin either a number or an identifier (such as a label), but it could not be determined which was\nintended. Usually this happens as a result of writing an identifier that starts with a digit\nsuch as \"0hello\" which is unfortunately not supported.", ambig),
                         )
                     }
                 }
