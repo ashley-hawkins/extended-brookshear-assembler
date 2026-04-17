@@ -911,23 +911,30 @@ x = 5 means test is less than"#,
         }
         egui::Window::new("Message Details")
             .open(&mut self.message_rich_text_window_open)
+            .frame(Frame::window(ui.style()).inner_margin(egui::Margin::ZERO))
             .resizable(true)
             .collapsible(false)
             .default_width(400.0)
             .default_height(300.0)
             .show(ui.ctx(), |ui| {
-                ScrollArea::both()
-                    .auto_shrink(egui::Vec2b::FALSE)
+                Frame::group(ui.style())
+                    .fill(egui::Color32::from_gray(10))
                     .show(ui, |ui| {
-                        if let Some(rich_text) = &self.message_rich_text {
-                            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-                            ui.style_mut().visuals.override_text_color = Some(crate::ansi::WHITE);
-                            let job = rich_text.layout(ui.style());
-                            let galley = ui.fonts_mut(|f| f.layout_job(job));
-                            ui.label(galley);
-                        } else {
-                            ui.label("No details available.");
-                        }
+                        ScrollArea::both()
+                            .auto_shrink(egui::Vec2b::FALSE)
+                            .show(ui, |ui| {
+                                if let Some(rich_text) = &self.message_rich_text {
+                                    ui.style_mut().override_text_style =
+                                        Some(egui::TextStyle::Monospace);
+                                    ui.style_mut().visuals.override_text_color =
+                                        Some(crate::ansi::WHITE);
+                                    let job = rich_text.layout(ui.style());
+                                    let galley = ui.fonts_mut(|f| f.layout_job(job));
+                                    ui.label(galley);
+                                } else {
+                                    ui.label("No details available.");
+                                }
+                            });
                     });
             });
     }
