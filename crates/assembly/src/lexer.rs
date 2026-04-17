@@ -14,25 +14,25 @@ use crate::common::Register;
 pub enum AsmToken<'a> {
     #[regex(r"R[0-9A-Fa-f]", |lex| Register::from_repr(u8::from_str_radix(&lex.slice()[1..], 16).unwrap()).unwrap())]
     Register(Register),
-    #[regex(r"[0-9A-Fa-f]{1,2}(_h)?", callback = |lex| {
+    #[regex(r"[0-9A-Fa-f]{1,2}(_h)?", priority = 3, callback = |lex| {
         let slice = lex.slice();
         let hex_str = slice.strip_suffix("_h").unwrap_or(slice);
         u8::from_str_radix(hex_str, 16).unwrap()
     })]
     LiteralHex(u8),
-    #[regex(r"[0-9]{1,3}_d", callback = |lex| {
+    #[regex(r"[0-9]{1,3}_d", priority = 3, callback = |lex| {
         let slice = lex.slice();
         let dec_str = &slice[..slice.len() - 2];
         dec_str.parse::<u8>().unwrap()
     })]
     LiteralDec(u8),
-    #[regex(r"[01]{8}|[01]{1,8}_b", callback = |lex| {
+    #[regex(r"[01]{8}|[01]{1,8}_b", priority = 3, callback = |lex| {
         let slice = lex.slice();
         let bin_str = slice.strip_suffix("_b").unwrap_or(slice);
         u8::from_str_radix(bin_str, 2).unwrap()
     })]
     LiteralBin(u8),
-    #[regex(r"[A-Za-z_][A-Za-z0-9_][A-Za-gi-z0-9_]|[A-Za-z_][A-Za-z0-9_]{3,}")]
+    #[regex(r"[A-Za-z_][A-Za-z0-9_]*", priority = 2)]
     Identifier(&'a str),
     // Catch anything that could've been a numeric or identifier but wasn't matched by the above patterns
     #[regex(r"[A-Za-z0-9_]+", priority = 1)]
@@ -92,7 +92,7 @@ impl std::fmt::Display for AsmToken<'_> {
             AsmToken::RightParen => write!(f, ")"),
             AsmToken::Colon => write!(f, ":"),
             AsmToken::Newline => write!(f, "\\n"),
-            AsmToken::Unrecognized(c) => write!(f, "{:?}", c),
+            AsmToken::Unrecognized(c) => write!(f, "{}", c),
             AsmToken::Error => write!(f, "<error>"),
         }
     }

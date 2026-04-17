@@ -50,8 +50,13 @@ impl<'a> Context<'a> {
                 })
                 .cloned()
                 .ok_or_else(|| {
-                    SerializationErrorMessage::UndefinedConstant(symbol.to_string())
-                        .with_span(expr.span)
+                    let valid_constants: Vec<String> =
+                        self.constants.keys().map(|k| k.to_string()).collect();
+                    SerializationErrorMessage::UndefinedConstant(
+                        symbol.to_string(),
+                        valid_constants,
+                    )
+                    .with_span(expr.span)
                 }),
             ConstantExpr::Arithmetic {
                 left,
@@ -77,15 +82,17 @@ pub enum SerializationErrorMessage {
     #[error("Invalid operand: {0}")]
     InvalidOperand(String),
     #[error("Undefined constant: {0}")]
-    UndefinedConstant(String),
+    UndefinedConstant(String, Vec<String>), // name of the undefined constant, plus the list of valid constant names for suggestions
     #[error("Cyclic dependency detected in constant evaluation: {}", .0.join(" -> "))]
     CyclicDependency(Vec<String>),
-    #[error("Unknown instruction mnemonic: {0}")]
+    #[error("Unknown instruction mnemonic: {}", .0.to_uppercase())]
     UnknownMnemonic(String),
     #[error(
         "Exceeded memory limit of 256 bytes. This instruction would be placed at address {0}, which is out of bounds."
     )]
     MemoryLimitExceeded(u32),
+    #[error("This constant pseudo-instruction does not have a label.")]
+    UnlabeledConstant(Option<SimpleSpan>), // span of the last offset if it had just been set
     #[error("{0}")]
     UnknownError(String),
 }
@@ -145,7 +152,7 @@ pub fn serialize_program(
 
     {
         let mut current_addr: u32 = 0;
-        let mut just_set_addr = false;
+        let mut just_set_addr_w_span = None;
         let mut prev_was_data = false;
         let mut current_segment = vec![];
 
@@ -159,11 +166,11 @@ pub fn serialize_program(
                 }
                 Some(Spanned {
                     inner: Annotation::Offset(offset),
-                    ..
+                    span
                 }) => {
                     segments.push(std::mem::take(&mut current_segment));
                     current_addr = offset as u32;
-                    just_set_addr = true;
+                    just_set_addr_w_span = Some(Some(span));
                 }
                 None => {}
             }
@@ -185,10 +192,16 @@ pub fn serialize_program(
                             }
                         };
 
+                        if waiting_labels.is_empty() {
+                            return Err(SerializationErrorMessage::UnlabeledConstant(just_set_addr_w_span.flatten()).with_span(instr.span));
+                        }
+
                         for label in &waiting_labels {
                             pending_constants.insert(*label, constant_expr);
                         }
                         waiting_labels.clear();
+                        just_set_addr_w_span.insert(None);
+                        continue;
                     }
                     "DATA" => {
                         for arg in instr.inner.detail.operands.iter() {
@@ -214,7 +227,7 @@ pub fn serialize_program(
                     }
                     "MOV" | "HALT" | "NOP" | "ADDI" | "ADDF" | "AND" | "OR" | "XOR" | "ROT"
                     | "JMP" | "JMPEQ" | "JMPNE" | "JMPGE" | "JMPLE" | "JMPGT" | "JMPLT" => {
-                        if prev_was_data && !just_set_addr {
+                        if prev_was_data && !just_set_addr_w_span.is_some() {
                             {
                                 // start_new_run:
                                 segments.push(std::mem::take(&mut current_segment));
@@ -251,7 +264,7 @@ pub fn serialize_program(
                         .with_span(instr.mnemonic.span));
                     }
                 }
-                just_set_addr = false;
+                just_set_addr_w_span = None;
             }
         }
         segments.push(current_segment);
@@ -405,10 +418,11 @@ fn recursively_evaluate_pending_constants<'a, 'b: 'a>(
                 eprintln!("Resolved constant {} to value {}", symbol, res);
                 Ok(res)
             } else {
-                Err(
-                    SerializationErrorMessage::UndefinedConstant(symbol.to_string())
-                        .with_span(*span),
+                Err(SerializationErrorMessage::UndefinedConstant(
+                    symbol.to_string(),
+                    pending_constants.keys().map(|k| k.to_string()).collect(),
                 )
+                .with_span(*span))
             }
         }
         ConstantExpr::Arithmetic {

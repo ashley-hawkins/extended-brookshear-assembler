@@ -6,7 +6,9 @@ resolver = "3"
 
 [workspace.dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
-
+regex = "1.12.3"
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.18"
 
 [profile.release]
 opt-level = "z" # fast and small wasm
