@@ -29,6 +29,9 @@ serde.workspace = true
 rfd = "0.17.2"
 futures = "0.3.32"
 anstyle-parse = "1.0.0"
+egui_commonmark = { features = [
+    "macros",
+], git = "https://github.com/ashley-hawkins/egui_commonmark.git", rev = "710c2e6d93be27e6323632958097e7e329e76d76" }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

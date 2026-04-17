@@ -1,3 +1,4 @@
+use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time;
 #[cfg(target_arch = "wasm32")]
@@ -32,10 +33,20 @@ enum PendingFileType {
     AssembleToFile,
 }
 
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+enum HelpPage {
+    #[default]
+    General,
+    Assembler,
+}
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Default)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct App {
+    #[serde(skip)]
+    md_cache: CommonMarkCache,
+    help_page: HelpPage,
     #[serde(skip)]
     message: String,
     #[serde(skip)]
@@ -74,7 +85,6 @@ pub struct App {
     instructions_window_open: bool,
     about_window_open: bool,
     help_window_open: bool,
-    assembler_help_window_open: bool,
     message_rich_text_window_open: bool,
 }
 
@@ -92,6 +102,9 @@ impl App {
         } else {
             Default::default()
         };
+
+        res.md_cache.add_link_hook("#bm-help");
+        res.md_cache.add_link_hook("#asm-help");
 
         // history entries are only 4 bytes so this is 4KB max
         res.emulator_state.set_history_limit(1000);
@@ -882,27 +895,34 @@ x = 5 means test is less than"#,
     }
 
     fn render_help_window(&mut self, ui: &mut egui::Ui) {
-        egui::Window::new("Help")
-            .open(&mut self.help_window_open)
-            .resizable(true)
-            .collapsible(false)
-            .default_width(400.0)
-            .default_height(300.0)
-            .show(ui.ctx(), |ui| {
-                ui.label("TODO");
+        egui::Window::new(match self.help_page {
+            HelpPage::General => "General Help",
+            HelpPage::Assembler => "Assembler Help",
+        })
+        .id(egui::Id::new("help_window"))
+        .open(&mut self.help_window_open)
+        .resizable(true)
+        .collapsible(false)
+        .default_width(400.0)
+        .default_height(300.0)
+        .show(ui.ctx(), |ui| {
+            ScrollArea::vertical().show(ui, |ui| {
+                CommonMarkViewer::new().enable_scroll_to_heading(true).show(
+                    ui,
+                    &mut self.md_cache,
+                    match self.help_page {
+                        HelpPage::General => include_str!("../../../doc/for_embedding/bmhelp.md"),
+                        HelpPage::Assembler => include_str!("../../../doc/for_embedding/asmhelp.md"),
+                    },
+                );
             });
-    }
+        });
 
-    fn render_assembler_help_window(&mut self, ui: &mut egui::Ui) {
-        egui::Window::new("Assembler Help")
-            .open(&mut self.assembler_help_window_open)
-            .resizable(true)
-            .collapsible(false)
-            .default_width(400.0)
-            .default_height(300.0)
-            .show(ui.ctx(), |ui| {
-                ui.label("TODO");
-            });
+        if self.md_cache.get_link_hook("#asm-help") == Some(true) {
+            self.help_page = HelpPage::Assembler;
+        } else if self.md_cache.get_link_hook("#bm-help") == Some(true) {
+            self.help_page = HelpPage::General;
+        }
     }
 
     fn render_message_rich_text_window(&mut self, ui: &mut egui::Ui) {
@@ -1065,7 +1085,6 @@ impl eframe::App for App {
         self.render_about_window(ui);
         self.render_instructions_window(ui);
         self.render_help_window(ui);
-        self.render_assembler_help_window(ui);
         self.render_message_rich_text_window(ui);
 
         egui::Panel::right("right_panel")
@@ -1086,13 +1105,15 @@ impl eframe::App for App {
                         .clicked()
                     {
                         self.help_window_open = true;
+                        self.help_page = HelpPage::General;
                     }
                     ui.add_space(10.0);
                     if ui
                         .add_sized([ui.available_width(), 20.0], Button::new("Assembler help"))
                         .clicked()
                     {
-                        self.assembler_help_window_open = true;
+                        self.help_window_open = true;
+                        self.help_page = HelpPage::Assembler;
                     }
                     ui.add_space(10.0);
                     ui.label("Messages");

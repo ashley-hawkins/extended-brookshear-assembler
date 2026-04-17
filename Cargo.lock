@@ -539,6 +539,7 @@ dependencies = [
  "brookshear_machine",
  "eframe",
  "egui",
+ "egui_commonmark",
  "egui_extras",
  "env_logger",
  "futures",
@@ -1029,6 +1030,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_commonmark"
+version = "0.23.0"
+source = "git+https://github.com/ashley-hawkins/egui_commonmark.git?rev=710c2e6d93be27e6323632958097e7e329e76d76#710c2e6d93be27e6323632958097e7e329e76d76"
+dependencies = [
+ "egui",
+ "egui_commonmark_backend",
+ "egui_commonmark_macros",
+ "egui_extras",
+ "pulldown-cmark",
+]
+
+[[package]]
+name = "egui_commonmark_backend"
+version = "0.23.0"
+source = "git+https://github.com/ashley-hawkins/egui_commonmark.git?rev=710c2e6d93be27e6323632958097e7e329e76d76#710c2e6d93be27e6323632958097e7e329e76d76"
+dependencies = [
+ "egui",
+ "egui_extras",
+ "pulldown-cmark",
+]
+
+[[package]]
+name = "egui_commonmark_macros"
+version = "0.23.0"
+source = "git+https://github.com/ashley-hawkins/egui_commonmark.git?rev=710c2e6d93be27e6323632958097e7e329e76d76#710c2e6d93be27e6323632958097e7e329e76d76"
+dependencies = [
+ "egui",
+ "egui_commonmark_backend",
+ "proc-macro-crate",
+ "proc-macro2",
+ "pulldown-cmark",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "egui_extras"
 version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1037,6 +1074,7 @@ dependencies = [
  "ahash",
  "egui",
  "enum-map",
+ "image",
  "log",
  "mime_guess2",
  "profiling",
@@ -2750,6 +2788,17 @@ checksum = "3852766467df634d74f0b2d7819bf8dc483a0eb2e3b0f50f756f9cfe8b0d18d8"
 dependencies = [
  "ar_archive_writer",
  "cc",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c3a14896dfa883796f1cb410461aef38810ea05f2b2c33c5aded3649095fdad"
+dependencies = [
+ "bitflags 2.11.0",
+ "memchr",
+ "unicase",
 ]
 
 [[package]]
