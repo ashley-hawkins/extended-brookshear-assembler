@@ -125,7 +125,7 @@ pub fn write_semantic_error(
                     constant_name,
                 ))
             } else {
-                Some(format!(
+                (!considered_similarities.is_empty()).then_some(format!(
                     "The symbolic name '{}' is not defined. Did you mean one of these? (Ranked by similarity):\n{}",
                     constant_name,
                     considered_similarities.iter().map(|(s, score)| format!("  - '{}' (similarity: {:.0}%)", s, score * 100.0)).collect::<Vec<_>>().join("\n")
@@ -147,7 +147,7 @@ pub fn write_semantic_error(
                 (sim > 0.55).then_some((valid_mnem, sim))
             }).collect::<Vec<_>>();
             considered_similarities.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
-            Some(format!("Did you mean one of these mnemonics? (Ranked by similarity):\n{}", considered_similarities.iter().map(|(s, score)| format!("  - '{}' (similarity: {:.0}%)", s, score * 100.0)).collect::<Vec<_>>().join("\n")))
+            (!considered_similarities.is_empty()).then_some(format!("Did you mean one of these mnemonics? (Ranked by similarity):\n{}", considered_similarities.iter().map(|(s, score)| format!("  - '{}' (similarity: {:.0}%)", s, score * 100.0)).collect::<Vec<_>>().join("\n")))
         }
         _ => None,
     })
