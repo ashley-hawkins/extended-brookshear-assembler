@@ -2,7 +2,17 @@ use logos::{Filter, Logos};
 
 use crate::common::Register;
 
-#[derive(Debug, PartialEq, Clone, Copy, Logos)]
+#[derive(thiserror::Error, Debug, PartialEq, Clone, Default)]
+pub enum LexErr {
+    #[error("Failed to parse number: {0}")]
+    ParseIntError(#[from] std::num::ParseIntError),
+    #[error("Unknown error")]
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, PartialEq, Clone, Logos)]
+#[logos(error = LexErr)]
 #[logos(subpattern single_whitespace = r"[ \t\r\n]")]
 #[logos(subpattern block_comment = r"/\*([^*]|\*+[^*/])*\*+/")]
 #[logos(subpattern line_comment = r"//[^\n]*")]
@@ -14,23 +24,20 @@ use crate::common::Register;
 pub enum AsmToken<'a> {
     #[regex(r"R[0-9A-Fa-f]", |lex| Register::from_repr(u8::from_str_radix(&lex.slice()[1..], 16).unwrap()).unwrap())]
     Register(Register),
-    #[regex(r"[0-9A-Fa-f]{1,2}(_h)?", priority = 3, callback = |lex| {
+    #[regex(r"[0-9A-Fa-f]{1,2}(_h)?", |lex| {
         let slice = lex.slice();
-        let hex_str = slice.strip_suffix("_h").unwrap_or(slice);
-        u8::from_str_radix(hex_str, 16).unwrap()
-    })]
+        u8::from_str_radix(slice.strip_suffix("_h").unwrap_or(slice), 16)
+    }, priority = 3)]
     LiteralHex(u8),
-    #[regex(r"[0-9]{1,3}_d", priority = 3, callback = |lex| {
+    #[regex(r"[0-9]+_d", |lex| {
         let slice = lex.slice();
-        let dec_str = &slice[..slice.len() - 2];
-        dec_str.parse::<u8>().unwrap()
-    })]
+        slice.strip_suffix("_d").unwrap_or(slice).parse::<u8>()
+    }, priority = 3)]
     LiteralDec(u8),
-    #[regex(r"[01]{8}|[01]{1,8}_b", priority = 3, callback = |lex| {
+    #[regex(r"[01]{8}|[01]+_b", |lex| {
         let slice = lex.slice();
-        let bin_str = slice.strip_suffix("_b").unwrap_or(slice);
-        u8::from_str_radix(bin_str, 2).unwrap()
-    })]
+        u8::from_str_radix(slice.strip_suffix("_b").unwrap_or(slice), 2)
+    }, priority = 3)]
     LiteralBin(u8),
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*", priority = 2)]
     Identifier(&'a str),
@@ -68,7 +75,7 @@ pub enum AsmToken<'a> {
     Newline,
     #[regex(r".", priority = 0, callback = |lex| lex.slice().chars().next().unwrap())]
     Unrecognized(char),
-    Error,
+    Error(LexErr),
 }
 
 impl std::fmt::Display for AsmToken<'_> {
@@ -93,7 +100,7 @@ impl std::fmt::Display for AsmToken<'_> {
             AsmToken::Colon => write!(f, ":"),
             AsmToken::Newline => write!(f, "\\n"),
             AsmToken::Unrecognized(c) => write!(f, "{}", c),
-            AsmToken::Error => write!(f, "<error>"),
+            AsmToken::Error(err) => write!(f, "{}", err),
         }
     }
 }

@@ -6,7 +6,7 @@ use chumsky::{
 };
 use regex::Regex;
 
-use crate::{lexer::AsmToken, serialize::SerializationErrorMessage};
+use crate::{lexer::{AsmToken, LexErr}, serialize::SerializationErrorMessage};
 
 
 pub fn write_parse_errors<'src>(
@@ -29,37 +29,33 @@ pub fn write_parse_errors<'src>(
                 expected: exp,
                 found: Some(inner_found),
             } => {
-                match **inner_found {
+                match (**inner_found).clone() {
+                    AsmToken::Error(LexErr::Unknown) => "Unknown lexer error. Please report on GitHub with an upload of input file that caused the error.".to_owned(),
+                    AsmToken::Error(LexErr::ParseIntError(parse_err)) => format!("Failed to parse this number as an 8-bit unsigned integer: {}", parse_err),
                     AsmToken::Ambiguous(ambig) => format!("Encountered ambiguous token: '{}'", ambig),
-                    other_token => 
-                    format!(
-                        "Encountered unexpected token: '{}'",
-                        other_token,
-                    )
+                    other_token => error.reason().to_string()
             }}
             RichReason::ExpectedFound {
                 expected: exp,
                 found: None,
-            } => 
-                "Encountered unexpected end of input".to_owned()
-            ,
+            } => error.reason().to_string(),
             RichReason::Custom(s) => s.clone(),
         })
         .with_label(
-            Label::new((file_name.clone(), error.span().into_range()))
-                .with_message(error.reason().to_string())
-                .with_color(Color::Red),
+                Label::new((file_name.clone(), error.span().into_range()))
+                    .with_message("Error occurred here.")
+                    .with_color(Color::Red),
         )
         .with_helps(match error.reason() {
             RichReason::ExpectedFound {
                 expected,
                 found: Some(found),
-            } => match (expected, **found) {
+            } => match (expected, (**found).clone()) {
                 (_, AsmToken::Ambiguous(ambig)) => {
                     if C_STYLE_HEX_RE.is_match(ambig) {
                         Some(format!("This token, \'{}\', looks like a C-style hexadecimal number. Hexadecimal numbers are written with no prefix, or optionally with the suffix _h, e.g. {}_h", ambig, &ambig[2..]))
                     } else if ambig.chars().all(|c| c.is_ascii_digit()) {
-                        Some(format!("This token, \'{}\', entirely consists of digits, but it is not a valid number because it is too large.", ambig))
+                        Some(format!("This token, \'{}\', entirely consists of digits, but it is not a valid number because it is not clear which base it is intended to be.\nSuffix it with _d for decimal, _h for hexadecimal, or _b for binary.", ambig))
                     } else {
                         Some(
                             format!("This token, \'{}\', is ambiguous due to the fact that it contains characters that could be used\nin either a number or an identifier (such as a label), but it could not be determined which was\nintended. Usually this happens as a result of writing an identifier that starts with a digit\nsuch as \"0hello\" which is unfortunately not supported.", ambig),
@@ -101,7 +97,7 @@ pub fn write_semantic_error(
     .with_message(error.message.to_string())
     .with_label(
         Label::new((file_name.clone(), error.span.into_range()))
-            .with_message(error.message.to_string())
+            .with_message("Error occurred here.")
             .with_color(Color::Red),
     )
     .with_labels(
@@ -137,9 +133,9 @@ pub fn write_semantic_error(
         SerializationErrorMessage::UnlabeledConstant(Some(explicit_addr_span)) => {
             let span_text = &src[explicit_addr_span.into_range()];
             if span_text.chars().any(|c| !c.is_ascii_digit())  {
-                Some("This constant pseudo-instruction does not have a symbolic name. It seems you tried to set a symbolic name and it was instead interpreted as an offset in hexadecimal.\nIn order to resolve this, you must disambiguate by using a symbolic name longer than 2 characters, or which contains at least one non-hexadecimal character.".to_string())
+                Some("This CONST pseudo-instruction does not have an associated symbolic name. It seems you tried to set a symbolic name and it was instead interpreted as an offset.\nIn order to resolve this, you must disambiguate by using a symbolic name longer than 2 characters, or which contains at least one non-hexadecimal character.".to_string())
             } else {
-                Some("This constant pseudo-instruction does not have a symbolic name, but it seems you tried to set a symbolic name and it was instead interpreted as an offset.\nSymbolic names must contain at least one non-decimal character or be longer than 3 characters.".to_string())
+                Some("This CONST pseudo-instruction does not have an associated symbolic name, but it seems you tried to set a symbolic name and it was instead interpreted as an offset.\nSymbolic names must begin with a non-digit and be longer than 2 characters.".to_string())
             }
         },
         SerializationErrorMessage::UnknownMnemonic(mnem) => {

@@ -250,7 +250,7 @@ pub fn parse_asm_file<'a>(
             .map(|(tok, span)| tok.map(|tok| (tok, SimpleSpan::new((), span))))
             .map(|res| match res {
                 Ok((tok, span)) => (tok, span),
-                Err(()) => (Token::Error, SimpleSpan::new((), lexer.span())),
+                Err(e) => (Token::Error(e), SimpleSpan::new((), lexer.span())),
             })
     });
 
