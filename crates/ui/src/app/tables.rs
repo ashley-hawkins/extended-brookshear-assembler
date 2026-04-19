@@ -36,7 +36,7 @@ impl TableHighlight {
 #[derive(Default)]
 pub struct EditableTableState {
     highlight: TableHighlight,
-    is_focused: bool,
+    should_grab_cell_focus: bool,
     editing_cell: Option<((usize, usize), String)>,
     should_grab_focus: bool,
 }
@@ -48,17 +48,20 @@ impl EditableTableState {
 
     pub fn clear_highlight(&mut self) {
         self.highlight = TableHighlight::None;
-        self.is_focused = false;
+        self.should_grab_cell_focus = false;
     }
 
     pub fn set_highlighted_row(&mut self, row: usize) {
         self.highlight = TableHighlight::Row(row);
-        self.is_focused = false;
+        self.should_grab_cell_focus = false;
     }
 
     pub fn set_highlighted_cell(&mut self, row: usize, column: usize) {
         self.highlight = TableHighlight::Cell { row, column };
-        self.is_focused = true;
+    }
+
+    pub fn focus_highlighted_cell(&mut self) {
+        self.should_grab_cell_focus = true;
     }
 }
 
@@ -145,12 +148,6 @@ where
 
     fn show(self, ui: &mut egui::Ui) {
         let row_count = self.rows.len();
-        let clicked_elsewhere = ui.ctx().input(|i| i.pointer.any_pressed());
-        let table_region = ui.available_rect_before_wrap();
-        let pointer_in_table = ui
-            .ctx()
-            .pointer_latest_pos()
-            .is_some_and(|pos| table_region.contains(pos));
 
         ScrollArea::horizontal().show(ui, |ui| {
             let mut table_builder = egui_extras::TableBuilder::new(ui)
@@ -181,9 +178,6 @@ where
             });
 
             table.ui_mut().style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-            if clicked_elsewhere && !pointer_in_table && self.state.editing_cell.is_none() {
-                self.state.is_focused = false;
-            }
 
             table.body(|body| {
                 body.rows(self.row_height, self.rows.len(), |mut row_ui| {
@@ -247,6 +241,7 @@ fn render_table_cell<Row, Col, Context>(
                                 (cell.row + 1).min(cell.row_count.saturating_sub(1)),
                                 cell.column,
                             );
+                            state.focus_highlighted_cell();
                             state.editing_cell = None;
                         }
                         Err(err) => {
@@ -259,22 +254,6 @@ fn render_table_cell<Row, Col, Context>(
                     state.editing_cell = None;
                 }
             }
-            return;
-        }
-
-        if is_highlighted_cell
-            && column.is_editable()
-            && state.is_focused
-            && state.editing_cell.is_none()
-            && let Some(text) = ui.input(|i| {
-                i.events.iter().find_map(|event| match event {
-                    egui::Event::Text(text) if !text.is_empty() => Some(text.clone()),
-                    _ => None,
-                })
-            })
-        {
-            state.editing_cell = Some((cell_coords, text));
-            state.should_grab_focus = true;
             return;
         }
 
@@ -296,11 +275,30 @@ fn render_table_cell<Row, Col, Context>(
                     ui.add(egui::Label::new(value.clone()).sense(egui::Sense::click()))
                 })
                 .inner;
+            if is_highlighted_cell && state.should_grab_cell_focus {
+                response.request_focus();
+                state.should_grab_cell_focus = false;
+            }
             if response.clicked() {
                 state.set_highlighted_cell(cell.row, cell.column);
+                response.request_focus();
             }
             if column.is_editable() && response.double_clicked() {
                 state.editing_cell = Some((cell_coords, value));
+                state.should_grab_focus = true;
+            }
+            if is_highlighted_cell
+                && column.is_editable()
+                && response.has_focus()
+                && state.editing_cell.is_none()
+                && let Some(text) = ui.input(|i| {
+                    i.events.iter().find_map(|event| match event {
+                        egui::Event::Text(text) if !text.is_empty() => Some(text.clone()),
+                        _ => None,
+                    })
+                })
+            {
+                state.editing_cell = Some((cell_coords, text));
                 state.should_grab_focus = true;
             }
         });
