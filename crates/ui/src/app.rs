@@ -72,7 +72,7 @@ pub struct App {
     #[serde(skip)]
     pending_file: Option<(
         PendingFileType,
-        futures::channel::oneshot::Receiver<Vec<u8>>,
+        futures::channel::oneshot::Receiver<(String, Vec<u8>)>,
     )>,
     #[serde(skip)]
     last_frame_time: std::time::Duration,
@@ -967,7 +967,7 @@ x = 5 means test is less than"#,
             {
                 let kind: PendingFileType = *kind;
                 match file_result {
-                    Some(file_contents) => {
+                    Some((file_name, file_contents)) => {
                         self.pending_file = None;
                         match kind {
                             PendingFileType::AssembleAndLoad => {
@@ -983,7 +983,7 @@ x = 5 means test is less than"#,
                                                 Some(crate::ansi::ansi_to_rich_text(
                                                     &parse_errors_to_string(
                                                         file_contents,
-                                                        "<input file>".to_string(),
+                                                        file_name.clone(),
                                                         e,
                                                     ),
                                                 ));
@@ -1001,7 +1001,7 @@ x = 5 means test is less than"#,
                                             Some(crate::ansi::ansi_to_rich_text(
                                                 &semantic_errors_to_string(
                                                     file_contents,
-                                                    "<input file>".to_string(),
+                                                    file_name,
                                                     &[err],
                                                 ),
                                             ));

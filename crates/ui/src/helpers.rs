@@ -2,13 +2,14 @@
 use js_sys::wasm_bindgen::{self, prelude::wasm_bindgen};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn open_file() -> futures::channel::oneshot::Receiver<Vec<u8>> {
+pub fn open_file() -> futures::channel::oneshot::Receiver<(String, Vec<u8>)> {
     let (sender, receiver) = futures::channel::oneshot::channel();
     let path = rfd::FileDialog::new().pick_file();
 
     if let Some(path) = path {
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
         sender
-            .send(std::fs::read(path).expect("Failed to read file"))
+            .send((file_name, std::fs::read(path).expect("Failed to read file")))
             .expect("Failed to send path through channel");
     } else {
         drop(sender);
@@ -17,14 +18,14 @@ pub fn open_file() -> futures::channel::oneshot::Receiver<Vec<u8>> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn open_file() -> futures::channel::oneshot::Receiver<Vec<u8>> {
+pub fn open_file() -> futures::channel::oneshot::Receiver<(String, Vec<u8>)> {
     let (sender, receiver) = futures::channel::oneshot::channel();
     wasm_bindgen_futures::spawn_local(async move {
         let file = rfd::AsyncFileDialog::new().pick_file().await;
         if let Some(file) = file {
             let data = file.read().await;
             sender
-                .send(data)
+                .send((file.file_name(), data))
                 .expect("Failed to send file data through channel");
         } else {
             drop(sender);
