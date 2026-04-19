@@ -89,6 +89,9 @@ pub struct App {
 }
 
 impl App {
+    const BM_HELP_LINK: &'static str = "./bmhelp.md";
+    const ASM_HELP_LINK: &'static str = "./asmhelp.md";
+
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
@@ -103,8 +106,8 @@ impl App {
             Default::default()
         };
 
-        res.md_cache.add_link_hook("#bm-help");
-        res.md_cache.add_link_hook("#asm-help");
+        res.md_cache.add_link_hook(Self::BM_HELP_LINK);
+        res.md_cache.add_link_hook(Self::ASM_HELP_LINK);
 
         // history entries are only 4 bytes so this is 4KB max
         res.emulator_state.set_history_limit(1000);
@@ -918,9 +921,9 @@ x = 5 means test is less than"#,
             });
         });
 
-        if self.md_cache.get_link_hook("#asm-help") == Some(true) {
+        if self.md_cache.get_link_hook(Self::ASM_HELP_LINK) == Some(true) {
             self.help_page = HelpPage::Assembler;
-        } else if self.md_cache.get_link_hook("#bm-help") == Some(true) {
+        } else if self.md_cache.get_link_hook(Self::BM_HELP_LINK) == Some(true) {
             self.help_page = HelpPage::General;
         }
     }

@@ -2,7 +2,7 @@
 
 This emulator runs the extended Brookshear Machine used by this project.
 
-Programs may be entered as raw memory images or assembled from source code. For assembly syntax, see the [assembler help](#asm-help).
+Programs may be entered as raw memory images or assembled from source code. For assembly syntax, see the [assembler help](./asmhelp.md).
 
 ## Contents
 
@@ -115,7 +115,7 @@ The CPU controls panel provides:
 
 - `Instructions` shows a condensed machine-code instruction reference.
 - `Help` opens this general help page.
-- `Assembler help` opens the [assembly-language reference](#asm-help).
+- `Assembler help` opens the [assembly-language reference](./asmhelp.md).
 - The status message area shows the current instruction count or any emulator error.
 - The status message box is clickable when detailed  output is available, such as full parser or assembler errors. The message will say "Click for details" if such details are available.
 

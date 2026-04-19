@@ -2,7 +2,7 @@
 
 This assembler targets the extended Brookshear Machine used by this project.
 
-For emulator and UI details, see the [general help](#bm-help).
+For emulator and UI details, see the [general help](./bmhelp.md).
 
 ## Contents {#contents}
 

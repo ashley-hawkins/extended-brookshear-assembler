@@ -22,9 +22,9 @@ It is a work in progress. It will have better error messages and usability once 
 
 ## Documentation
 
-- `doc/asmhelp.md` documents the current assembler syntax, including `CONST`, constant expressions, literal forms, and the actual jump operand rules.
-- `doc/bmhelp.md` documents the current emulator UI and file formats.
-- `examples/chessboard.txt` is a simple example program that draws an 8x8 chessboard pattern in the bitmapped display.
+- [doc/asmhelp.md](./doc/asmhelp.md) documents the current assembler syntax, including `CONST`, constant expressions, literal forms, and the actual jump operand rules.
+- [doc/bmhelp.md](./doc/bmhelp.md) documents the current emulator UI and file formats.
+- [examples/chessboard.txt](./examples/chessboard.txt) is a simple example program that draws an 8x8 chessboard pattern in the bitmapped display.
 
 ## Improvements - GUI Emulator
 
