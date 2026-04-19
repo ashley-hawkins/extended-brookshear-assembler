@@ -42,6 +42,10 @@ pub struct EditableTableState {
 }
 
 impl EditableTableState {
+    pub fn is_editing(&self) -> bool {
+        self.editing_cell.is_some()
+    }
+
     pub fn clear_highlight(&mut self) {
         self.highlight = TableHighlight::None;
         self.is_focused = false;

@@ -99,6 +99,8 @@ struct AppUiState {
     last_frame_time: std::time::Duration,
     wants_to_jump_to_address: Option<u8>,
     jump_to_address_input_buffer: String,
+    pasted_program_buffer: String,
+    show_paste_dialog: bool,
 }
 
 struct InfoPanel;
@@ -348,6 +350,113 @@ impl App {
         }
 
         self.ui_state.program_counter_input_buffer = format!("{:0>2}", filtered);
+    }
+
+    fn any_inline_editor_active(&self) -> bool {
+        self.ui_state.register_table_state.is_editing()
+            || self.ui_state.memory_table_state.is_editing()
+    }
+
+    fn handle_global_paste(&mut self, ctx: &egui::Context) {
+        if self.ui_state.show_paste_dialog
+            || self.any_inline_editor_active()
+            || ctx.egui_wants_keyboard_input()
+        {
+            return;
+        }
+
+        let pasted_text = ctx.input(|i| {
+            i.events.iter().find_map(|event| match event {
+                egui::Event::Paste(text) if !text.trim().is_empty() => Some(text.clone()),
+                _ => None,
+            })
+        });
+
+        if let Some(text) = pasted_text {
+            self.ui_state.pasted_program_buffer = text;
+            self.ui_state.show_paste_dialog = true;
+        }
+    }
+
+    fn assemble_and_load_text(
+        &mut self,
+        file_contents: &str,
+        file_name: impl Into<String>,
+    ) -> Result<(), MaybeRichError> {
+        let file_name = file_name.into();
+        let program = brookshear_assembly::parser::parse_asm_file(file_contents).map_err(|e| {
+            MaybeRichError::new(
+                "Failed to parse assembly, click to see details.",
+                crate::ansi::ansi_to_rich_text(&parse_errors_to_string(
+                    file_contents,
+                    file_name.clone(),
+                    &e,
+                )),
+            )
+        })?;
+        let result = brookshear_assembly::serialize::serialize_program_to_binary(&program)
+            .map_err(|err| {
+                MaybeRichError::new(
+                    "Failed to assemble program. Click to see details.",
+                    crate::ansi::ansi_to_rich_text(&semantic_errors_to_string(
+                        file_contents,
+                        file_name,
+                        &[err],
+                    )),
+                )
+            })?;
+        self.emulator_state.load_memory(result);
+        self.set_message("Successfully loaded program.");
+        Ok(())
+    }
+
+    fn render_paste_dialog(&mut self, ctx: &egui::Context) {
+        if !self.ui_state.show_paste_dialog {
+            return;
+        }
+
+        let mut open = self.ui_state.show_paste_dialog;
+        let mut should_close = false;
+
+        egui::Window::new("Pasted Text")
+            .open(&mut open)
+            .resizable(true)
+            .collapsible(false)
+            .default_width(500.0)
+            .default_height(320.0)
+            .show(ctx, |ui| {
+                ui.label("Paste detected. Would you like to assemble and load this text?");
+                ui.add_space(8.0);
+                ui.add(
+                    TextEdit::multiline(&mut self.ui_state.pasted_program_buffer)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(12)
+                        .code_editor(),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Assemble and Load").clicked() {
+                        let pasted_program = self.ui_state.pasted_program_buffer.clone();
+                        match self.assemble_and_load_text(&pasted_program, "Pasted Program") {
+                            Ok(()) => {
+                                self.ui_state.pasted_program_buffer.clear();
+                                should_close = true;
+                            }
+                            Err(err) => self.set_maybe_rich_message(err),
+                        }
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        self.ui_state.pasted_program_buffer.clear();
+                        should_close = true;
+                    }
+                });
+            });
+
+        self.ui_state.show_paste_dialog = open && !should_close;
+        if should_close {
+            self.ui_state.show_paste_dialog = false;
+        }
     }
 
     fn set_highlighted_row(&mut self, row: u8) {
@@ -754,35 +863,7 @@ impl App {
                                         "Failed to parse file contents as UTF-8",
                                     ));
                                 };
-                                let program = brookshear_assembly::parser::parse_asm_file(file_contents)
-                                    .map_err(|e| {
-                                        MaybeRichError::new(
-                                            "Failed to parse assembly, click to see details.",
-                                            crate::ansi::ansi_to_rich_text(&parse_errors_to_string(
-                                                file_contents,
-                                                file_name.clone(),
-                                                &e,
-                                            )),
-                                        )
-                                    })?;
-                                let result =
-                                    brookshear_assembly::serialize::serialize_program_to_binary(
-                                        &program,
-                                    )
-                                    .map_err(|err| {
-                                        MaybeRichError::new(
-                                            "Failed to assemble program. Click to see details.",
-                                            crate::ansi::ansi_to_rich_text(
-                                                &semantic_errors_to_string(
-                                                    file_contents,
-                                                    file_name,
-                                                    &[err],
-                                                ),
-                                            ),
-                                        )
-                                    })?;
-                                self.emulator_state.load_memory(result);
-                                self.set_message("Successfully loaded program.");
+                                self.assemble_and_load_text(file_contents, file_name)?;
                             }
                             PendingFileType::LoadMemory => {
                                 self.emulator_state.load_memory(
@@ -861,8 +942,11 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let begin_frame = time::Instant::now();
 
+        self.handle_global_paste(ui.ctx());
+
         self.windows
             .show(ui.ctx(), self.ui_state.message.rich_text.as_ref());
+        self.render_paste_dialog(ui.ctx());
 
         InfoPanel::show(self, ui);
         egui::CentralPanel::default().show_inside(ui, |ui| {
