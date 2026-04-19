@@ -1,13 +1,13 @@
 use std::{borrow::Borrow, sync::LazyLock};
 
 use ariadne::{Color, Label, Report, ReportKind, sources};
-use chumsky::{
-    error::RichReason,
-};
+use chumsky::error::RichReason;
 use regex::Regex;
 
-use crate::{lexer::{AsmToken, LexErr}, serialize::SerializationErrorMessage};
-
+use crate::{
+    lexer::{AsmToken, LexErr},
+    serialize::SerializationErrorMessage,
+};
 
 pub fn write_parse_errors<'src>(
     src: &'src str,
@@ -15,7 +15,8 @@ pub fn write_parse_errors<'src>(
     errors: &[impl Borrow<crate::parser::Error<'src>>],
     w: &mut impl std::io::Write,
 ) {
-    static C_STYLE_HEX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^0[xX][0-9a-fA-F]+$").unwrap());
+    static C_STYLE_HEX_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^0[xX][0-9a-fA-F]+$").unwrap());
 
     for error in errors {
         let error = error.borrow();
@@ -26,17 +27,17 @@ pub fn write_parse_errors<'src>(
         .with_config(ariadne::Config::new().with_index_type(ariadne::IndexType::Byte))
         .with_message(match error.reason() {
             RichReason::ExpectedFound {
-                expected: exp,
+                expected: _,
                 found: Some(inner_found),
             } => {
                 match (**inner_found).clone() {
                     AsmToken::Error(LexErr::Unknown) => "Unknown lexer error. Please report on GitHub with an upload of input file that caused the error.".to_owned(),
                     AsmToken::Error(LexErr::ParseIntError(parse_err)) => format!("Failed to parse this number as an 8-bit unsigned integer: {}", parse_err),
                     AsmToken::Ambiguous(ambig) => format!("Encountered ambiguous token: '{}'", ambig),
-                    other_token => error.reason().to_string()
+                    _other_token => error.reason().to_string()
             }}
             RichReason::ExpectedFound {
-                expected: exp,
+                expected: _,
                 found: None,
             } => error.reason().to_string(),
             RichReason::Custom(s) => s.clone(),
@@ -154,8 +155,8 @@ pub fn write_semantic_error(
     .unwrap()
 }
 
-pub fn semantic_errors_to_string<'src>(
-    src: &'src str,
+pub fn semantic_errors_to_string(
+    src: &str,
     file_name: String,
     errors: &[impl Borrow<crate::serialize::SerializationError>],
 ) -> String {

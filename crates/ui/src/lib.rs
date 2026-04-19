@@ -1,6 +1,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
+mod ansi;
 mod app;
-pub mod helpers;
-pub mod ansi;
+mod helpers;
 pub use app::App;

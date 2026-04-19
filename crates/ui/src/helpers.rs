@@ -1,8 +1,11 @@
 #[cfg(target_arch = "wasm32")]
 use js_sys::wasm_bindgen::{self, prelude::wasm_bindgen};
 
+pub type NamedFile = (String, Vec<u8>);
+pub type FileReceiver = futures::channel::oneshot::Receiver<NamedFile>;
+
 #[cfg(not(target_arch = "wasm32"))]
-pub fn open_file() -> futures::channel::oneshot::Receiver<(String, Vec<u8>)> {
+pub fn open_file() -> FileReceiver {
     let (sender, receiver) = futures::channel::oneshot::channel();
     let path = rfd::FileDialog::new().pick_file();
 
@@ -18,7 +21,7 @@ pub fn open_file() -> futures::channel::oneshot::Receiver<(String, Vec<u8>)> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn open_file() -> futures::channel::oneshot::Receiver<(String, Vec<u8>)> {
+pub fn open_file() -> FileReceiver {
     let (sender, receiver) = futures::channel::oneshot::channel();
     wasm_bindgen_futures::spawn_local(async move {
         let file = rfd::AsyncFileDialog::new().pick_file().await;

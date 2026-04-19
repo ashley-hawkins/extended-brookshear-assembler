@@ -166,7 +166,7 @@ pub fn serialize_program(
                 }
                 Some(Spanned {
                     inner: Annotation::Offset(offset),
-                    span
+                    span,
                 }) => {
                     segments.push(std::mem::take(&mut current_segment));
                     current_addr = offset as u32;
@@ -193,7 +193,10 @@ pub fn serialize_program(
                         };
 
                         if waiting_labels.is_empty() {
-                            return Err(SerializationErrorMessage::UnlabeledConstant(just_set_addr_w_span.flatten()).with_span(instr.span));
+                            return Err(SerializationErrorMessage::UnlabeledConstant(
+                                just_set_addr_w_span.flatten(),
+                            )
+                            .with_span(instr.span));
                         }
 
                         for label in &waiting_labels {

@@ -1,4 +1,4 @@
-use egui::{Color32, FontSelection, RichText};
+use egui::{Color32, FontSelection};
 
 pub const BLACK: egui::Color32 = egui::Color32::from_rgb(0, 0, 0);
 pub const RED: egui::Color32 = egui::Color32::from_rgb(205, 0, 0);

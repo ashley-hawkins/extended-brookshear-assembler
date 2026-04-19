@@ -1,4 +1,6 @@
-use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
+mod tables;
+mod windows;
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::time;
 #[cfg(target_arch = "wasm32")]
@@ -8,13 +10,17 @@ use brookshear_assembly::{
     common::Register,
     errors::{parse_errors_to_string, semantic_errors_to_string},
 };
-use brookshear_machine::{BrookshearMachine, float8_to_string, string_to_float8};
+use brookshear_machine::BrookshearMachine;
 use egui::{Align, Button, Frame, Label, Layout, RadioButton, ScrollArea, Slider, TextEdit};
 use egui_extras::{Column, Size, StripBuilder};
 
 use crate::{
     ansi::MyRichText,
-    helpers::{self, open_file},
+    app::{
+        tables::EditableTableState,
+        windows::{AppWindows, HelpPage, WindowOpenId},
+    },
+    helpers::{self, FileReceiver, open_file},
 };
 
 #[derive(Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -33,65 +39,206 @@ enum PendingFileType {
     AssembleToFile,
 }
 
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-enum HelpPage {
-    #[default]
-    General,
-    Assembler,
+#[derive(Default)]
+struct MessageState {
+    text: String,
+    rich_text: Option<MyRichText>,
+}
+
+struct MaybeRichError {
+    message: String,
+    rich_text: Option<MyRichText>,
+}
+
+impl MaybeRichError {
+    fn new(message: impl Into<String>, rich_text: MyRichText) -> Self {
+        Self {
+            message: message.into(),
+            rich_text: Some(rich_text),
+        }
+    }
+}
+
+impl From<String> for MaybeRichError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            rich_text: None,
+        }
+    }
+}
+
+impl From<&str> for MaybeRichError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+
+type PendingFile = (PendingFileType, FileReceiver);
+
+type MaybePendingFile = Option<PendingFile>;
+
+#[derive(Default)]
+struct AppUiState {
+    message: MessageState,
+    register_table_state: EditableTableState,
+    memory_table_state: EditableTableState,
+    program_counter_input_buffer: String,
+    last_instruction_time: Option<time::Instant>,
+    duration_to_account_for: std::time::Duration,
+    pending_file: MaybePendingFile,
+    last_frame_time: std::time::Duration,
+    wants_to_jump_to_address: Option<u8>,
+    jump_to_address_input_buffer: String,
+}
+
+struct InfoPanel;
+
+impl InfoPanel {
+    fn show(app: &mut App, ui: &mut egui::Ui) {
+        egui::Panel::right("right_panel")
+            .resizable(false)
+            .exact_size(200.0)
+            .show_inside(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.heading("Information");
+                    if ui
+                        .add_sized([ui.available_width(), 20.0], Button::new("Instructions"))
+                        .clicked()
+                    {
+                        app.windows.open(WindowOpenId::Instructions);
+                    }
+                    ui.add_space(10.0);
+                    if ui
+                        .add_sized([ui.available_width(), 20.0], Button::new("Help"))
+                        .clicked()
+                    {
+                        app.windows
+                            .open(WindowOpenId::Help(Some(HelpPage::General)));
+                    }
+                    ui.add_space(10.0);
+                    if ui
+                        .add_sized([ui.available_width(), 20.0], Button::new("Assembler help"))
+                        .clicked()
+                    {
+                        app.windows
+                            .open(WindowOpenId::Help(Some(HelpPage::Assembler)));
+                    }
+                    ui.add_space(10.0);
+                    ui.label("Messages");
+                });
+                ui.with_layout(Layout::bottom_up(Align::TOP), |ui| {
+                    ui.label(format!(
+                        "Last frame time: {:.2} ms",
+                        app.ui_state.last_frame_time.as_secs_f64() * 1000.0
+                    ));
+                    ui.label(format!(
+                        "Window size: {} x {}",
+                        ui.ctx().viewport_rect().width(),
+                        ui.ctx().viewport_rect().height()
+                    ));
+
+                    let w = ui.available_width();
+                    ui.spacing_mut().slider_width =
+                        w - ui.spacing().interact_size.x - ui.spacing().button_padding.x * 2.0;
+                    ui.add_sized(
+                        [w, 20.0],
+                        Slider::new(&mut app.instructions_per_second, 0.5..=200.0)
+                            .clamping(egui::SliderClamping::Never)
+                            .logarithmic(true),
+                    );
+                    app.instructions_per_second = app.instructions_per_second.clamp(0.5, 1000.0);
+                    ui.label("Speed (instructions per second)");
+                    ui.add_space(10.0);
+                    if ui
+                        .add_sized([w, 20.0], Button::new("Reset & Run"))
+                        .on_hover_text("Reset registers and start running")
+                        .clicked()
+                    {
+                        app.emulator_state.reset_registers();
+                        app.emulator_instructions_executed = 0;
+                        app.update_pc_text_buffer();
+                        app.cont();
+                    }
+                    ui.add_space(10.0);
+                    if ui
+                        .add_sized(
+                            [w, 20.0],
+                            Button::new(if app.emulator_next_action == EmulatorAction::Continue {
+                                "Pause"
+                            } else {
+                                "Continue"
+                            }),
+                        )
+                        .on_hover_text("Pause/resume execution")
+                        .clicked()
+                    {
+                        match app.emulator_next_action {
+                            EmulatorAction::Continue => app.pause(),
+                            _ => app.cont(),
+                        }
+                    }
+                    ui.add_space(10.0);
+                    if ui.add_sized([w, 20.0], Button::new("Undo Step")).clicked() {
+                        app.schedule_unstep();
+                    }
+
+                    ui.add_space(10.0);
+                    if ui
+                        .add_sized([w, 20.0], Button::new("Step"))
+                        .on_hover_text("Execute one step at a time")
+                        .clicked()
+                    {
+                        app.schedule_step();
+                    }
+                    ui.heading("CPU Controls");
+                    let frame_rect = Frame::group(ui.style())
+                        .show(ui, |ui| {
+                            ui.allocate_ui_with_layout(
+                                ui.available_size(),
+                                Layout::top_down(Align::LEFT),
+                                |ui| {
+                                    ui.label(&app.ui_state.message.text);
+                                    ui.take_available_space();
+                                },
+                            )
+                        })
+                        .inner
+                        .response
+                        .rect;
+                    if ui
+                        .interact(
+                            frame_rect,
+                            "msgbox".into(),
+                            egui::Sense::click() | egui::Sense::hover(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        app.windows.open(WindowOpenId::MessageDetails);
+                    };
+                });
+            });
+    }
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Default)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct App {
-    #[serde(skip)]
-    md_cache: CommonMarkCache,
-    help_page: HelpPage,
-    #[serde(skip)]
-    message: String,
-    #[serde(skip)]
-    message_rich_text: Option<MyRichText>,
-
     emulator_instructions_executed: u64,
     emulator_state: BrookshearMachine,
     emulator_next_action: EmulatorAction,
     display_on: bool,
     descriptive_disassembly: bool,
-    #[serde(skip)]
-    register_table_state: EditableTableState,
-    #[serde(skip)]
-    memory_table_state: EditableTableState,
-    #[serde(skip)]
-    program_counter_input_buffer: String,
     highlighted_row: u8,
     instructions_per_second: f64,
+    windows: AppWindows,
     #[serde(skip)]
-    last_instruction_time: Option<time::Instant>,
-    #[serde(skip)]
-    duration_to_account_for: std::time::Duration,
-    #[serde(skip)]
-    pending_file: Option<(
-        PendingFileType,
-        futures::channel::oneshot::Receiver<(String, Vec<u8>)>,
-    )>,
-    #[serde(skip)]
-    last_frame_time: std::time::Duration,
-
-    #[serde(skip)]
-    wants_to_jump_to_address: Option<u8>,
-    #[serde(skip)]
-    jump_to_address_input_buffer: String,
-
-    instructions_window_open: bool,
-    about_window_open: bool,
-    help_window_open: bool,
-    message_rich_text_window_open: bool,
+    ui_state: AppUiState,
 }
 
 impl App {
-    const BM_HELP_LINK: &'static str = "./bmhelp.md";
-    const ASM_HELP_LINK: &'static str = "./asmhelp.md";
-
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
@@ -106,8 +253,7 @@ impl App {
             Default::default()
         };
 
-        res.md_cache.add_link_hook(Self::BM_HELP_LINK);
-        res.md_cache.add_link_hook(Self::ASM_HELP_LINK);
+        res.windows.initialize();
 
         // history entries are only 4 bytes so this is 4KB max
         res.emulator_state.set_history_limit(1000);
@@ -116,8 +262,8 @@ impl App {
     }
 
     fn schedule_step(&mut self) {
-        self.last_instruction_time = None;
-        self.duration_to_account_for = time::Duration::ZERO;
+        self.ui_state.last_instruction_time = None;
+        self.ui_state.duration_to_account_for = time::Duration::ZERO;
         self.emulator_next_action = EmulatorAction::Step;
         self.update_pc_text_buffer();
     }
@@ -130,10 +276,10 @@ impl App {
         let res = self.emulator_state.step();
         if let Ok(true) = res {
             self.emulator_instructions_executed += 1;
-            self.message = format!(
+            self.set_message(format!(
                 "Instructions executed: {}",
                 self.emulator_instructions_executed
-            );
+            ));
         }
         self.update_pc_text_buffer();
         self.highlighted_row = self.emulator_state.get_pc();
@@ -143,145 +289,44 @@ impl App {
     fn undo_step(&mut self) {
         if self.emulator_state.undo_step() {
             self.emulator_instructions_executed -= 1;
-            self.message = format!(
+            self.set_message(format!(
                 "Instructions executed: {}",
                 self.emulator_instructions_executed
-            );
+            ));
         } else {
-            self.message = "No more steps to undo.".to_string();
+            self.set_message("No more steps to undo.");
         }
         self.update_pc_text_buffer();
         self.highlighted_row = self.emulator_state.get_pc();
     }
 
     fn cont(&mut self) {
-        self.last_instruction_time = None;
-        self.duration_to_account_for = time::Duration::ZERO;
+        self.ui_state.last_instruction_time = None;
+        self.ui_state.duration_to_account_for = time::Duration::ZERO;
         self.emulator_next_action = EmulatorAction::Continue;
         self.update_pc_text_buffer();
     }
 
     fn pause(&mut self) {
-        self.last_instruction_time = None;
-        self.duration_to_account_for = time::Duration::ZERO;
+        self.ui_state.last_instruction_time = None;
+        self.ui_state.duration_to_account_for = time::Duration::ZERO;
         self.emulator_next_action = EmulatorAction::Idle;
         self.update_pc_text_buffer();
     }
 
-    fn update_pc_text_buffer(&mut self) {
-        self.program_counter_input_buffer = format!("{:02X}", self.emulator_state.get_pc());
+    fn set_message(&mut self, message: impl Into<String>) {
+        self.ui_state.message.text = message.into();
+        self.ui_state.message.rich_text = None;
     }
 
-    fn render_register_table(&mut self, ui: &mut egui::Ui) {
-        ScrollArea::horizontal().show(ui, |ui| {
-            Frame::group(ui.style()).show(ui, |ui: &mut egui::Ui| {
-                let table_builder = egui_extras::TableBuilder::new(ui)
-                    .min_scrolled_height(80.0)
-                    .striped(true)
-                    .column(Column::auto().resizable(true).at_least(20.0))
-                    .column(Column::auto().resizable(true).at_least(64.0))
-                    .column(Column::auto().resizable(true).at_least(22.0))
-                    .columns(
-                        Column::auto_with_initial_suggestion(50.0)
-                            .resizable(true)
-                            .at_least(30.0),
-                        2,
-                    )
-                    .column(Column::auto().resizable(true).at_least(30.0))
-                    .column(
-                        Column::remainder()
-                            .resizable(true)
-                            .clip(true)
-                            .at_least(30.0),
-                    );
+    fn set_maybe_rich_message(&mut self, error: MaybeRichError) {
+        self.ui_state.message.text = error.message;
+        self.ui_state.message.rich_text = error.rich_text;
+    }
 
-                let mut table = table_builder.header(20.0, |mut row| {
-                    for header in [
-                        "Register",
-                        "Binary",
-                        "Hex",
-                        "Unsigned Decimal",
-                        "Signed Decimal",
-                        "Float",
-                        "ASCII",
-                    ] {
-                        row.col(|ui| {
-                            ui.centered_and_justified(|ui| {
-                                ui.add(
-                                    egui::Label::new(header)
-                                        .truncate()
-                                        .show_tooltip_when_elided(true),
-                                );
-                            });
-                        });
-                    }
-                });
-
-                table.ui_mut().style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-
-                table.body(|body| {
-                    body.rows(14.0, BrookshearMachine::REGISTER_COUNT, |mut row| {
-                        let i = row.index() as u8;
-                        let byte = self
-                            .emulator_state
-                            .get_register_mut(Register::from_repr(i).unwrap());
-                        row.col(|ui| {
-                            ui.centered_and_justified(|ui| {
-                                ui.label(format!("{:X}", i));
-                            });
-                        });
-                        editable(
-                            &mut row,
-                            &mut self.register_table_state,
-                            (i.into(), 1),
-                            byte,
-                            |val| format!("{:08b}", val),
-                            |s| u8::from_str_radix(s, 2).ok(),
-                        );
-                        editable(
-                            &mut row,
-                            &mut self.register_table_state,
-                            (i.into(), 2),
-                            byte,
-                            |val| format!("{:02X}", val),
-                            |s| u8::from_str_radix(s, 16).ok(),
-                        );
-                        editable(
-                            &mut row,
-                            &mut self.register_table_state,
-                            (i.into(), 3),
-                            byte,
-                            |val| format!("{}", val),
-                            |s| s.parse::<u64>().ok().map(|v| v.rem_euclid(256) as u8),
-                        );
-                        editable(
-                            &mut row,
-                            &mut self.register_table_state,
-                            (i.into(), 4),
-                            byte,
-                            |val| format!("{}", val as i8),
-                            |s| s.parse::<i8>().ok().map(|v| v as u8),
-                        );
-                        editable(
-                            &mut row,
-                            &mut self.register_table_state,
-                            (i.into(), 5),
-                            byte,
-                            float8_to_string,
-                            string_to_float8,
-                        );
-                        editable(
-                            &mut row,
-                            &mut self.register_table_state,
-                            (i.into(), 6),
-                            byte,
-                            byte_to_ascii,
-                            ascii_string_to_byte,
-                        );
-                    });
-                });
-            });
-        });
+    fn update_pc_text_buffer(&mut self) {
+        self.ui_state.program_counter_input_buffer =
+            format!("{:02X}", self.emulator_state.get_pc());
     }
 
     fn render_memory_buttons(&mut self, ui: &mut egui::Ui) {
@@ -342,7 +387,7 @@ impl App {
                                                 .clicked()
                                             {
                                                 let handle_receiver = open_file();
-                                                self.pending_file = Some((
+                                                self.ui_state.pending_file = Some((
                                                     PendingFileType::LoadMemory,
                                                     handle_receiver,
                                                 ));
@@ -365,7 +410,7 @@ impl App {
                                                 .clicked()
                                             {
                                                 let handle_receiver = open_file();
-                                                self.pending_file = Some((
+                                                self.ui_state.pending_file = Some((
                                                     PendingFileType::AssembleAndLoad,
                                                     handle_receiver,
                                                 ));
@@ -384,7 +429,7 @@ impl App {
                                                 .clicked()
                                             {
                                                 let handle_receiver = open_file();
-                                                self.pending_file = Some((
+                                                self.ui_state.pending_file = Some((
                                                     PendingFileType::AssembleToFile,
                                                     handle_receiver,
                                                 ));
@@ -405,7 +450,7 @@ impl App {
                                                 )
                                                 .clicked()
                                             {
-                                                self.about_window_open = true;
+                                                self.windows.open(WindowOpenId::About);
                                             }
                                         });
                                         strip.cell(|ui| {
@@ -413,7 +458,9 @@ impl App {
                                                 .add_sized(
                                                     ui.available_size(),
                                                     TextEdit::singleline(
-                                                        &mut self.jump_to_address_input_buffer,
+                                                        &mut self
+                                                            .ui_state
+                                                            .jump_to_address_input_buffer,
                                                     )
                                                     .hint_text("Jump to cell..."),
                                                 )
@@ -424,12 +471,12 @@ impl App {
                                                 .lost_focus()
                                                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                                                 && let Ok(val) = u8::from_str_radix(
-                                                    &self.jump_to_address_input_buffer,
+                                                    &self.ui_state.jump_to_address_input_buffer,
                                                     16,
                                                 )
                                             {
-                                                self.wants_to_jump_to_address = Some(val);
-                                                self.jump_to_address_input_buffer.clear();
+                                                self.ui_state.wants_to_jump_to_address = Some(val);
+                                                self.ui_state.jump_to_address_input_buffer.clear();
                                             }
                                         });
                                     });
@@ -536,7 +583,7 @@ impl App {
                                     ui.set_max_size([20.0, 20.0].into());
                                     let response = ui.add(
                                         egui::TextEdit::singleline(
-                                            &mut self.program_counter_input_buffer,
+                                            &mut self.ui_state.program_counter_input_buffer,
                                         )
                                         .char_limit(3)
                                         .frame(Frame::NONE)
@@ -549,7 +596,10 @@ impl App {
                                         egui::TextEdit::load_state(ui.ctx(), text_edit_id)
                                     {
                                         let ccursor = egui::text::CCursor::new(
-                                            self.program_counter_input_buffer.chars().count(),
+                                            self.ui_state
+                                                .program_counter_input_buffer
+                                                .chars()
+                                                .count(),
                                         );
                                         state.cursor.set_char_range(Some(
                                             egui::text::CCursorRange::one(ccursor),
@@ -557,9 +607,10 @@ impl App {
                                         state.store(ui.ctx(), text_edit_id);
                                     }
 
-                                    self.program_counter_input_buffer = format!(
+                                    self.ui_state.program_counter_input_buffer = format!(
                                         "{:0>2}",
-                                        &self.program_counter_input_buffer[self
+                                        &self.ui_state.program_counter_input_buffer[self
+                                            .ui_state
                                             .program_counter_input_buffer
                                             .len()
                                             .saturating_sub(2)..]
@@ -568,7 +619,7 @@ impl App {
                                     if response.lost_focus()
                                         && ui.input(|i| i.key_pressed(egui::Key::Enter))
                                         && let Ok(val) = u8::from_str_radix(
-                                            &self.program_counter_input_buffer,
+                                            &self.ui_state.program_counter_input_buffer,
                                             16,
                                         )
                                     {
@@ -662,356 +713,51 @@ impl App {
         }
     }
 
-    fn render_memory_table(&mut self, ui: &mut egui::Ui) {
-        let layout = Layout::bottom_up(Align::TOP).with_cross_justify(true);
-        ui.with_layout(layout, |ui| {
-            let w = ui.available_width();
-            self.render_memory_buttons(ui);
-            ui.add_space(4.0);
-
-            Frame::group(ui.style())
-                .inner_margin(egui::Margin::symmetric(4, 0))
-                .show(ui, |ui: &mut egui::Ui| {
-                    ui.set_width(w);
-                    ui.set_max_width(w);
-                    ui.vertical(|ui| {
-                        ScrollArea::horizontal().show(ui, |ui| {
-                            let mut table_builder = egui_extras::TableBuilder::new(ui)
-                                .min_scrolled_height(80.0)
-                                .striped(true)
-                                .column(Column::auto().resizable(true).at_least(20.0))
-                                .column(Column::auto().resizable(true).at_least(64.0))
-                                .column(Column::auto().resizable(true).at_least(22.0))
-                                .columns(
-                                    Column::auto_with_initial_suggestion(50.0)
-                                        .resizable(true)
-                                        .at_least(30.0),
-                                    2,
-                                )
-                                .column(Column::auto().resizable(true).at_least(30.0))
-                                .column(Column::auto().resizable(true).at_least(30.0))
-                                .column(
-                                    Column::remainder()
-                                        .resizable(true)
-                                        .clip(true)
-                                        .at_least(100.0),
-                                );
-
-                            if let Some(val) = self.wants_to_jump_to_address {
-                                self.wants_to_jump_to_address = None;
-                                self.highlighted_row = val;
-                                table_builder = table_builder.scroll_to_row(val.into(), None);
-                            }
-
-                            let mut table = table_builder.header(20.0, |mut row| {
-                                for header in [
-                                    "Address",
-                                    "Binary",
-                                    "Hex",
-                                    "Unsigned Decimal",
-                                    "Signed Decimal",
-                                    "Float",
-                                    "ASCII",
-                                    "Instruction",
-                                ] {
-                                    row.col(|ui| {
-                                        ui.centered_and_justified(|ui| {
-                                            ui.add(
-                                                egui::Label::new(header)
-                                                    .truncate()
-                                                    .show_tooltip_when_elided(true),
-                                            );
-                                        });
-                                    });
-                                }
-                            });
-
-                            table.ui_mut().style_mut().wrap_mode =
-                                Some(egui::TextWrapMode::Truncate);
-
-                            table.body(|body| {
-                                body.rows(20.0, BrookshearMachine::MEMORY_SIZE, |mut row| {
-                                    if row.index() as u8 == self.highlighted_row {
-                                        row.set_selected(true);
-                                    }
-                                    let i = row.index() as u8;
-
-                                    let byte = self.emulator_state.get_memory_mut(i);
-                                    row.col(|ui| {
-                                        ui.centered_and_justified(|ui| {
-                                            ui.add(egui::Label::new(format!("{:02X}", i)));
-                                        });
-                                    });
-                                    editable(
-                                        &mut row,
-                                        &mut self.memory_table_state,
-                                        (i.into(), 1),
-                                        byte,
-                                        |val| format!("{:08b}", val),
-                                        |s| u8::from_str_radix(s, 2).ok(),
-                                    );
-                                    editable(
-                                        &mut row,
-                                        &mut self.memory_table_state,
-                                        (i.into(), 2),
-                                        byte,
-                                        |val| format!("{:02X}", val),
-                                        |s| u8::from_str_radix(s, 16).ok(),
-                                    );
-                                    editable(
-                                        &mut row,
-                                        &mut self.memory_table_state,
-                                        (i.into(), 3),
-                                        byte,
-                                        |val| format!("{}", val),
-                                        |s| s.parse::<u64>().ok().map(|v| v.rem_euclid(256) as u8),
-                                    );
-                                    editable(
-                                        &mut row,
-                                        &mut self.memory_table_state,
-                                        (i.into(), 4),
-                                        byte,
-                                        |val| format!("{}", val as i8),
-                                        |s| s.parse::<i8>().ok().map(|v| v as u8),
-                                    );
-                                    editable(
-                                        &mut row,
-                                        &mut self.memory_table_state,
-                                        (i.into(), 5),
-                                        byte,
-                                        float8_to_string,
-                                        string_to_float8,
-                                    );
-                                    editable(
-                                        &mut row,
-                                        &mut self.memory_table_state,
-                                        (i.into(), 6),
-                                        byte,
-                                        byte_to_ascii,
-                                        ascii_string_to_byte,
-                                    );
-                                    row.col(|ui| {
-                                        ui.centered_and_justified(|ui| {
-                                            if i.is_multiple_of(2) {
-                                                self.emulator_state
-                                                    .fetch_instruction(i)
-                                                    .inspect(|instr| {
-                                                        ui.label(if self.descriptive_disassembly {
-                                                            instr.describe()
-                                                        } else {
-                                                            instr.disasm()
-                                                        });
-                                                    })
-                                                    .ok();
-                                            }
-                                        });
-                                    });
-                                });
-                            });
-                        });
-                    });
-                });
-        });
-    }
-
-    fn render_about_window(&mut self, ui: &mut egui::Ui) {
-        egui::Window::new("About")
-            .open(&mut self.about_window_open)
-            .resizable(false)
-            .collapsible(false)
-            .default_width(300.0)
-            .default_height(150.0)
-            .show(ui.ctx(), |ui| {
-                ui.vertical(|ui| {
-                    ui.heading("Brookshear Machine Emulator");
-                    ui.label("Created by Ashley Hawkins");
-                    ui.label("UI layout and extended instructions are based on JBrookshearMachine by Milan Gritta");
-                    ui.horizontal(|ui| {
-                        ui.label("Source code available at:");
-                        ui.add(
-                            egui::Hyperlink::new(
-                                "https://github.com/ashley-hawkins/extended-brookshear-assembler",
-                            )
-                            .open_in_new_tab(true),
-                        );
-                    });
-                    powered_by_egui_and_eframe(ui);
-                });
-            });
-    }
-
-    fn render_instructions_window(&mut self, ui: &mut egui::Ui) {
-        egui::Window::new("Instructions")
-            .open(&mut self.instructions_window_open)
-            .resizable(true)
-            .collapsible(false)
-            .default_width(400.0)
-            .default_height(300.0)
-            .show(ui.ctx(), |ui| {
-                ui.vertical(|ui| {
-                    ui.heading("Extended Brookshear Machine Instructions");
-                    ui.label(concat!(
-                        "The Extended Brookshear Machine has 16 instructions, ",
-                        "having a fixed length of two bytes per instruction. ",
-                        "Those two bytes contain 1 nibble for the opcode, and ",
-                        "up to 3 nibbles for operands. ",
-                        "The instruction set is as follows:",
-                    ));
-                    egui::Grid::new("instructions_grid").show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        for (name, description) in [
-                            ("0FFF", "No operation.."),
-                            ("1rxy", "Load memory[xy] into Rr."),
-                            ("2rxy", "Load value xy into Rr."),
-                            ("3rxy", "Store Rr into memory[xy]."),
-                            ("40rs", "Move Rr to Rs"),
-                            ("5rst", "Add as ints, Rs, Rt, put result in Rr"),
-                            ("6rst", "Add as floats, Rs, Rt, put result in Rr"),
-                            ("7rst", "OR each bit of Rs and Rt, put result in Rr"),
-                            ("8rst", "AND each bit of Rs and Rt, put result in Rr"),
-                            ("9rst", "XOR each bit of Rs and Rt, put result in Rr"),
-                            ("Ar0x", "Rotate Rr right by x bits"),
-                            ("Brxy", "Jump to address xy if Rr equals R0"),
-                            ("C000", "Halt"),
-                            ("D0rs", "Load Rr from memory[Rs]"),
-                            ("E0rs", "Store Rr in memory[Rs]"),
-                            (
-                                "Frxt",
-                                r#"Jump to address in Rt if Rr test R0
-x = 0 means test is equals
-x = 1 means test is not equals
-x = 2 means test is greater or equal
-x = 3 means test is less or equal
-x = 4 means test is greater than
-x = 5 means test is less than"#,
-                            ),
-                        ] {
-                            ui.vertical(|ui| {
-                                ui.label(name);
-                            });
-                            ui.label(description);
-                            ui.end_row();
-                        }
-                    });
-                });
-            });
-    }
-
-    fn render_help_window(&mut self, ui: &mut egui::Ui) {
-        egui::Window::new(match self.help_page {
-            HelpPage::General => "General Help",
-            HelpPage::Assembler => "Assembler Help",
-        })
-        .id(egui::Id::new("help_window"))
-        .open(&mut self.help_window_open)
-        .resizable(true)
-        .collapsible(false)
-        .default_width(400.0)
-        .default_height(300.0)
-        .show(ui.ctx(), |ui| {
-            ScrollArea::vertical().show(ui, |ui| {
-                CommonMarkViewer::new().enable_scroll_to_heading(true).show(
-                    ui,
-                    &mut self.md_cache,
-                    match self.help_page {
-                        HelpPage::General => include_str!("../../../doc/for_embedding/bmhelp.md"),
-                        HelpPage::Assembler => include_str!("../../../doc/for_embedding/asmhelp.md"),
-                    },
-                );
-            });
-        });
-
-        if self.md_cache.get_link_hook(Self::ASM_HELP_LINK) == Some(true) {
-            self.help_page = HelpPage::Assembler;
-        } else if self.md_cache.get_link_hook(Self::BM_HELP_LINK) == Some(true) {
-            self.help_page = HelpPage::General;
-        }
-    }
-
-    fn render_message_rich_text_window(&mut self, ui: &mut egui::Ui) {
-        if self.message_rich_text.is_none() {
-            self.message_rich_text_window_open = false;
-        }
-        egui::Window::new("Message Details")
-            .open(&mut self.message_rich_text_window_open)
-            .frame(Frame::window(ui.style()).inner_margin(egui::Margin::ZERO))
-            .resizable(true)
-            .collapsible(false)
-            .default_width(400.0)
-            .default_height(300.0)
-            .show(ui.ctx(), |ui| {
-                *ui.style_mut() = ui.ctx().options(|o| (*o.dark_style).clone());
-                Frame::group(ui.style())
-                    .fill(egui::Color32::from_gray(20))
-                    .show(ui, |ui| {
-                        ScrollArea::both()
-                            .auto_shrink(egui::Vec2b::FALSE)
-                            .show(ui, |ui| {
-                                if let Some(rich_text) = &self.message_rich_text {
-                                    ui.style_mut().override_text_style =
-                                        Some(egui::TextStyle::Monospace);
-                                    ui.style_mut().visuals.override_text_color =
-                                        Some(crate::ansi::WHITE);
-                                    let job = rich_text.layout(ui.style());
-                                    let galley = ui.fonts_mut(|f| f.layout_job(job));
-                                    ui.label(galley);
-                                } else {
-                                    ui.label("No details available.");
-                                }
-                            });
-                    });
-            });
-    }
-
     fn handle_pending_file(&mut self) {
         (|| {
-            if let Some((kind, handle)) = &mut self.pending_file
+            if let Some((kind, handle)) = &mut self.ui_state.pending_file
                 && let Ok(file_result) = handle.try_recv()
             {
                 let kind: PendingFileType = *kind;
                 match file_result {
                     Some((file_name, file_contents)) => {
-                        self.pending_file = None;
+                        self.ui_state.pending_file = None;
                         match kind {
                             PendingFileType::AssembleAndLoad => {
                                 let Ok(file_contents) = &str::from_utf8(&file_contents) else {
-                                    return Err(
-                                        "Failed to parse file contents as UTF-8".to_string()
-                                    );
+                                    return Err(MaybeRichError::from(
+                                        "Failed to parse file contents as UTF-8",
+                                    ));
                                 };
-                                let program =
-                                    brookshear_assembly::parser::parse_asm_file(file_contents)
-                                        .inspect_err(|e| {
-                                            self.message_rich_text =
-                                                Some(crate::ansi::ansi_to_rich_text(
-                                                    &parse_errors_to_string(
-                                                        file_contents,
-                                                        file_name.clone(),
-                                                        e,
-                                                    ),
-                                                ));
-                                        })
-                                        .map_err(|_| {
-                                            "Failed to parse assembly, click to see details."
-                                                .to_string()
-                                        })?;
+                                let program = brookshear_assembly::parser::parse_asm_file(file_contents)
+                                    .map_err(|e| {
+                                        MaybeRichError::new(
+                                            "Failed to parse assembly, click to see details.",
+                                            crate::ansi::ansi_to_rich_text(&parse_errors_to_string(
+                                                file_contents,
+                                                file_name.clone(),
+                                                &e,
+                                            )),
+                                        )
+                                    })?;
                                 let result =
                                     brookshear_assembly::serialize::serialize_program_to_binary(
                                         &program,
                                     )
                                     .map_err(|err| {
-                                        self.message_rich_text =
-                                            Some(crate::ansi::ansi_to_rich_text(
+                                        MaybeRichError::new(
+                                            "Failed to assemble program. Click to see details.",
+                                            crate::ansi::ansi_to_rich_text(
                                                 &semantic_errors_to_string(
                                                     file_contents,
                                                     file_name,
                                                     &[err],
                                                 ),
-                                            ));
-                                        "Failed to process program. Click to see details."
-                                            .to_string()
+                                            ),
+                                        )
                                     })?;
                                 self.emulator_state.load_memory(result);
+                                self.set_message("Successfully loaded program.");
                             }
                             PendingFileType::LoadMemory => {
                                 self.emulator_state.load_memory(
@@ -1022,42 +768,42 @@ x = 5 means test is less than"#,
                                         )
                                     })?,
                                 );
+                                self.set_message("Successfully loaded memory.");
                             }
                             PendingFileType::AssembleToFile => {
                                 let file_contents =
                                     &str::from_utf8(&file_contents).map_err(|_| {
                                         "File does not contain valid UTF-8. Only UTF-8 encoded files are supported.".to_string()
                                     })?;
-                                let program =
-                                    brookshear_assembly::parser::parse_asm_file(file_contents)
-                                        .map_err(|e| {
-                                            self.message_rich_text =
-                                                Some(crate::ansi::ansi_to_rich_text(
-                                                    &parse_errors_to_string(
-                                                        file_contents,
-                                                        "<input file>".to_string(),
-                                                        &e,
-                                                    ),
-                                                ));
-                                            "Failed to parse assembly file, click to see details."
-                                                .to_string()
-                                        })?;
+                                let program = brookshear_assembly::parser::parse_asm_file(file_contents)
+                                    .map_err(|e| {
+                                        MaybeRichError::new(
+                                            "Failed to parse assembly, click to see details.",
+                                            crate::ansi::ansi_to_rich_text(&parse_errors_to_string(
+                                                file_contents,
+                                                file_name.to_string(),
+                                                &e,
+                                            )),
+                                        )
+                                    })?;
                                 let result =
                                     brookshear_assembly::serialize::serialize_program_to_binary(
                                         &program,
                                     )
                                     .map_err(|err| {
-                                        self.message_rich_text =
-                                            Some(crate::ansi::ansi_to_rich_text(
+                                        MaybeRichError::new(
+                                            "Failed to assemble program. Click to see details.",
+                                            crate::ansi::ansi_to_rich_text(
                                                 &semantic_errors_to_string(
                                                     file_contents,
-                                                    "<input file>".to_string(),
+                                                    file_name.to_string(),
                                                     &[err],
                                                 ),
-                                            ));
-                                        "Failed to process program. Click to see details.".to_string()
+                                            ),
+                                        )
                                     })?;
                                 helpers::save_file(result.to_vec(), "Untitled Program.bin");
+                                self.set_message("Successfully assembled program.");
                             }
                         }
                     }
@@ -1068,9 +814,9 @@ x = 5 means test is less than"#,
             Ok(())
         })()
         .unwrap_or_else(|err| {
-            eprintln!("Error handling file: {err}");
-            self.pending_file = None;
-            self.message = err;
+            eprintln!("Error handling file: {}", err.message);
+            self.ui_state.pending_file = None;
+            self.set_maybe_rich_message(err);
         });
     }
 }
@@ -1085,135 +831,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let begin_frame = time::Instant::now();
 
-        self.render_about_window(ui);
-        self.render_instructions_window(ui);
-        self.render_help_window(ui);
-        self.render_message_rich_text_window(ui);
+        self.windows
+            .show(ui.ctx(), self.ui_state.message.rich_text.as_ref());
 
-        egui::Panel::right("right_panel")
-            .resizable(false)
-            .exact_size(200.0)
-            .show_inside(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.heading("Information");
-                    if ui
-                        .add_sized([ui.available_width(), 20.0], Button::new("Instructions"))
-                        .clicked()
-                    {
-                        self.instructions_window_open = true;
-                    }
-                    ui.add_space(10.0);
-                    if ui
-                        .add_sized([ui.available_width(), 20.0], Button::new("Help"))
-                        .clicked()
-                    {
-                        self.help_window_open = true;
-                        self.help_page = HelpPage::General;
-                    }
-                    ui.add_space(10.0);
-                    if ui
-                        .add_sized([ui.available_width(), 20.0], Button::new("Assembler help"))
-                        .clicked()
-                    {
-                        self.help_window_open = true;
-                        self.help_page = HelpPage::Assembler;
-                    }
-                    ui.add_space(10.0);
-                    ui.label("Messages");
-                });
-                ui.with_layout(Layout::bottom_up(Align::TOP), |ui| {
-                    // powered_by_egui_and_eframe(ui);
-                    ui.label(format!(
-                        "Last frame time: {:.2} ms",
-                        self.last_frame_time.as_secs_f64() * 1000.0
-                    ));
-                    ui.label(format!(
-                        "Window size: {} x {}",
-                        ui.ctx().viewport_rect().width(),
-                        ui.ctx().viewport_rect().height()
-                    ));
-
-                    let w = ui.available_width();
-                    ui.spacing_mut().slider_width =
-                        w - ui.spacing().interact_size.x - ui.spacing().button_padding.x * 2.0;
-                    ui.add_sized(
-                        [w, 20.0],
-                        Slider::new(&mut self.instructions_per_second, 0.5..=200.0)
-                            .clamping(egui::SliderClamping::Never)
-                            .logarithmic(true),
-                    );
-                    self.instructions_per_second = self.instructions_per_second.clamp(0.5, 1000.0);
-                    ui.label("Speed (instructions per second)");
-                    ui.add_space(10.0);
-                    if ui
-                        .add_sized([w, 20.0], Button::new("Reset & Run"))
-                        .on_hover_text("Reset registers and start running")
-                        .clicked()
-                    {
-                        self.emulator_state.reset_registers();
-                        self.emulator_instructions_executed = 0;
-                        self.update_pc_text_buffer();
-                        self.cont();
-                    }
-                    ui.add_space(10.0);
-                    if ui
-                        .add_sized(
-                            [w, 20.0],
-                            Button::new(if self.emulator_next_action == EmulatorAction::Continue {
-                                "Pause"
-                            } else {
-                                "Continue"
-                            }),
-                        )
-                        .on_hover_text("Pause/resume execution")
-                        .clicked()
-                    {
-                        match self.emulator_next_action {
-                            EmulatorAction::Continue => self.pause(),
-                            _ => self.cont(),
-                        }
-                    }
-                    ui.add_space(10.0);
-                    if ui.add_sized([w, 20.0], Button::new("Undo Step")).clicked() {
-                        self.schedule_unstep();
-                    }
-
-                    ui.add_space(10.0);
-                    if ui
-                        .add_sized([w, 20.0], Button::new("Step"))
-                        .on_hover_text("Execute one step at a time")
-                        .clicked()
-                    {
-                        self.schedule_step();
-                    }
-                    ui.heading("CPU Controls");
-                    let frame_rect = Frame::group(ui.style())
-                        .show(ui, |ui| {
-                            ui.allocate_ui_with_layout(
-                                ui.available_size(),
-                                Layout::top_down(Align::LEFT),
-                                |ui| {
-                                    ui.label(&self.message);
-                                    ui.take_available_space();
-                                },
-                            )
-                        })
-                        .inner
-                        .response
-                        .rect;
-                    if ui
-                        .interact(
-                            frame_rect,
-                            "msgbox".into(),
-                            egui::Sense::click() | egui::Sense::hover(),
-                        )
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
-                    {
-                        self.message_rich_text_window_open = true;
-                    };
-                });
-            });
+        InfoPanel::show(self, ui);
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let h = ui.available_height();
             let half_w = ui.available_width() / 2.0;
@@ -1247,14 +868,15 @@ impl eframe::App for App {
                 let this_time = time::Instant::now();
                 let period = time::Duration::from_secs_f64(1.0 / self.instructions_per_second);
                 let time_difference: time::Duration = self
+                    .ui_state
                     .last_instruction_time
                     .map(|t| this_time - t)
                     .unwrap_or(period);
-                self.last_instruction_time = Some(this_time);
-                self.duration_to_account_for += time_difference;
+                self.ui_state.last_instruction_time = Some(this_time);
+                self.ui_state.duration_to_account_for += time_difference;
 
-                while self.duration_to_account_for.as_secs_f64() >= period.as_secs_f64() {
-                    self.duration_to_account_for -= period;
+                while self.ui_state.duration_to_account_for.as_secs_f64() >= period.as_secs_f64() {
+                    self.ui_state.duration_to_account_for -= period;
 
                     match self.do_step() {
                         Ok(true) => {} // continue running
@@ -1262,7 +884,7 @@ impl eframe::App for App {
                             self.pause();
                         }
                         Err(e) => {
-                            self.message = format!("Emulator error: {}", e);
+                            self.set_message(format!("Emulator error: {}", e));
                             self.pause();
                         }
                     }
@@ -1272,7 +894,7 @@ impl eframe::App for App {
                 match self.do_step() {
                     Ok(_) => {}
                     Err(e) => {
-                        self.message = format!("Emulator error: {}", e);
+                        self.set_message(format!("Emulator error: {}", e));
                     }
                 }
                 self.pause();
@@ -1290,157 +912,6 @@ impl eframe::App for App {
             ui.ctx().request_repaint();
         }
 
-        self.last_frame_time = frame_time;
+        self.ui_state.last_frame_time = frame_time;
     }
-}
-
-fn byte_to_ascii(byte: u8) -> String {
-    if byte.is_ascii_graphic() {
-        format!("{}", byte as char)
-    } else {
-        match byte {
-            0 => "NUL",
-            1 => "SOH",
-            2 => "STX",
-            3 => "ETX",
-            4 => "EOT",
-            5 => "ENQ",
-            6 => "ACK",
-            7 => "BEL",
-            8 => "BS",
-            9 => "HT",
-            10 => "LF",
-            11 => "VT",
-            12 => "FF",
-            13 => "CR",
-            14 => "SO",
-            15 => "SI",
-            16 => "DLE",
-            17 => "DC1",
-            18 => "DC2",
-            19 => "DC3",
-            20 => "DC4",
-            21 => "NAK",
-            22 => "SYN",
-            23 => "ETB",
-            24 => "CAN",
-            25 => "EM",
-            26 => "SUB",
-            27 => "ESC",
-            28 => "FS",
-            29 => "GS",
-            30 => "RS",
-            31 => "US",
-            32 => "SP",
-            127 => "DEL",
-            _ => "�", // Non-ASCII or non-printable
-        }
-        .to_owned()
-    }
-}
-
-fn ascii_string_to_byte(s: &str) -> Option<u8> {
-    if s.len() == 1 {
-        Some(s.as_bytes()[0])
-    } else {
-        match s {
-            "NUL" => Some(0),
-            "SOH" => Some(1),
-            "STX" => Some(2),
-            "ETX" => Some(3),
-            "EOT" => Some(4),
-            "ENQ" => Some(5),
-            "ACK" => Some(6),
-            "BEL" => Some(7),
-            "BS" => Some(8),
-            "HT" => Some(9),
-            "LF" => Some(10),
-            "VT" => Some(11),
-            "FF" => Some(12),
-            "CR" => Some(13),
-            "SO" => Some(14),
-            "SI" => Some(15),
-            "DLE" => Some(16),
-            "DC1" => Some(17),
-            "DC2" => Some(18),
-            "DC3" => Some(19),
-            "DC4" => Some(20),
-            "NAK" => Some(21),
-            "SYN" => Some(22),
-            "ETB" => Some(23),
-            "CAN" => Some(24),
-            "EM" => Some(25),
-            "SUB" => Some(26),
-            "ESC" => Some(27),
-            "FS" => Some(28),
-            "GS" => Some(29),
-            "RS" => Some(30),
-            "US" => Some(31),
-            "SP" => Some(32),
-            "DEL" => Some(127),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Default)]
-struct EditableTableState {
-    editing_cell: Option<((usize, usize), String)>,
-    should_grab_focus: bool,
-}
-
-fn editable(
-    row: &mut egui_extras::TableRow<'_, '_>,
-    state: &mut EditableTableState,
-    cell: (usize, usize),
-    value: &mut u8,
-    to_string: impl Fn(u8) -> String,
-    from_string: impl Fn(&str) -> Option<u8>,
-) {
-    row.col(|ui| {
-        if let Some((cell_being_edited, edit_str)) = &mut state.editing_cell
-            && &cell == cell_being_edited
-        {
-            let response = ui.text_edit_singleline(edit_str);
-            if state.should_grab_focus {
-                response.request_focus();
-                state.should_grab_focus = false;
-            }
-            if response.lost_focus() {
-                if ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    && let Some(new_value) = from_string(edit_str)
-                {
-                    *value = new_value;
-                }
-                state.editing_cell = None;
-            }
-        } else {
-            ui.centered_and_justified(|ui| {
-                if ui.label(to_string(*value)).double_clicked() {
-                    state.editing_cell = Some((cell, to_string(*value)));
-                    state.should_grab_focus = true;
-                }
-            });
-        }
-    });
-}
-
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.add(
-            egui::Hyperlink::from_label_and_url("egui", "https://github.com/emilk/egui")
-                .open_in_new_tab(true),
-        );
-        ui.label(" and ");
-        ui.add(
-            egui::Hyperlink::from_label_and_url(
-                "eframe",
-                "https://github.com/emilk/egui/tree/master/crates/eframe",
-            )
-            .open_in_new_tab(true),
-        );
-        ui.label(".");
-    });
 }

@@ -886,28 +886,29 @@ pub fn convert_instruction<'a>(
     instr: &Spanned<crate::parser::Instruction<'a>>,
     ctx: &Context,
 ) -> SerializeResult<ConvertedInstruction> {
-    let res: ConvertedInstruction = ConvertedInstruction::Code(match instr.inner.mnemonic.inner.to_uppercase().as_str() {
-        "CONST" => {
-            unreachable!("CONST should have been skipped in an earlier pass.");
-        }
-        "DATA" => {
-            let [expr] = assert_operands(&instr.inner.detail)?;
-            assert_no_destination_operand(&instr.inner.detail)?;
+    let res: ConvertedInstruction =
+        ConvertedInstruction::Code(match instr.inner.mnemonic.inner.to_uppercase().as_str() {
+            "CONST" => {
+                unreachable!("CONST should have been skipped in an earlier pass.");
+            }
+            "DATA" => {
+                let [expr] = assert_operands(&instr.inner.detail)?;
+                assert_no_destination_operand(&instr.inner.detail)?;
 
-            let value = match &expr.inner.core {
-                CoreOperand::Constant(expr) => ctx.evaluate_constant_expr(expr)?,
-                _ => {
-                    return Err(SerializationErrorMessage::InvalidOperand(
-                        "Operand of DATA must be an immediate constant expression".to_string(),
-                    )
-                    .with_span(expr.span));
-                }
-            };
+                let value = match &expr.inner.core {
+                    CoreOperand::Constant(expr) => ctx.evaluate_constant_expr(expr)?,
+                    _ => {
+                        return Err(SerializationErrorMessage::InvalidOperand(
+                            "Operand of DATA must be an immediate constant expression".to_string(),
+                        )
+                        .with_span(expr.span));
+                    }
+                };
 
-            return Ok(ConvertedInstruction::Data(value));
-        }
-        _ => StructuredInstruction::from_ast(instr, ctx)?,
-    });
+                return Ok(ConvertedInstruction::Data(value));
+            }
+            _ => StructuredInstruction::from_ast(instr, ctx)?,
+        });
 
     // if let ConvertedInstruction::Code(converted_instr) = &res {
     //     eprintln!(
