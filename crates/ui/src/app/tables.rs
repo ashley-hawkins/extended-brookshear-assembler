@@ -4,7 +4,7 @@ use brookshear_machine::{BrookshearMachine, float8_to_string, string_to_float8};
 use egui::{Align, Frame, Layout, ScrollArea};
 use egui_extras::Column;
 
-use super::App;
+use super::{App, MaybeRichError, MessageState};
 
 #[derive(Clone, Copy, Default)]
 pub enum TableHighlight {
@@ -69,8 +69,14 @@ trait TableColumn<Row, Context>: Copy {
         false
     }
 
-    fn try_set(self, _row_index: usize, _row: &mut Row, _value: &str, _context: &Context) -> bool {
-        false
+    fn try_set(
+        self,
+        _row_index: usize,
+        _row: &mut Row,
+        _value: &str,
+        _context: &Context,
+    ) -> Result<(), MaybeRichError> {
+        Err(MaybeRichError::from("This cell is not editable."))
     }
 }
 
@@ -79,6 +85,7 @@ struct SelectableTable<'a, Row, Col, Context> {
     columns: &'a [Col],
     rows: &'a mut [Row],
     state: &'a mut EditableTableState,
+    message_state: &'a mut MessageState,
     context: &'a Context,
     row_height: f32,
     min_scrolled_height: f32,
@@ -101,6 +108,7 @@ where
         columns: &'a [Col],
         rows: &'a mut [Row],
         state: &'a mut EditableTableState,
+        message_state: &'a mut MessageState,
         context: &'a Context,
     ) -> Self {
         Self {
@@ -108,6 +116,7 @@ where
             columns,
             rows,
             state,
+            message_state,
             context,
             row_height: 20.0,
             min_scrolled_height: 80.0,
@@ -184,6 +193,7 @@ where
                         render_table_cell(
                             &mut row_ui,
                             self.state,
+                            self.message_state,
                             CellLocation {
                                 row: row_index,
                                 column: column_index,
@@ -203,6 +213,7 @@ where
 fn render_table_cell<Row, Col, Context>(
     row_ui: &mut egui_extras::TableRow<'_, '_>,
     state: &mut EditableTableState,
+    message_state: &mut MessageState,
     cell: CellLocation,
     row: &mut Row,
     column: Col,
@@ -225,13 +236,24 @@ fn render_table_cell<Row, Col, Context>(
             }
             if response.lost_focus() {
                 if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    let _ = column.try_set(cell.row, row, edit_str, context);
-                    state.set_highlighted_cell(
-                        (cell.row + 1).min(cell.row_count.saturating_sub(1)),
-                        cell.column,
-                    );
+                    match column.try_set(cell.row, row, edit_str, context) {
+                        Ok(()) => {
+                            message_state.set_message(String::new());
+                            state.set_highlighted_cell(
+                                (cell.row + 1).min(cell.row_count.saturating_sub(1)),
+                                cell.column,
+                            );
+                            state.editing_cell = None;
+                        }
+                        Err(err) => {
+                            message_state.set_maybe_rich_message(err);
+                            state.should_grab_focus = true;
+                        }
+                    }
                 }
-                state.editing_cell = None;
+                if !state.should_grab_focus {
+                    state.editing_cell = None;
+                }
             }
             return;
         }
@@ -349,23 +371,25 @@ impl TableColumn<u8, ()> for RegisterColumn {
         !matches!(self, Self::Register)
     }
 
-    fn try_set(self, _row_index: usize, row: &mut u8, value: &str, _context: &()) -> bool {
+    fn try_set(
+        self,
+        _row_index: usize,
+        row: &mut u8,
+        value: &str,
+        _context: &(),
+    ) -> Result<(), MaybeRichError> {
         let parsed = match self {
-            Self::Register => None,
-            Self::Binary => u8::from_str_radix(value, 2).ok(),
-            Self::Hex => u8::from_str_radix(value, 16).ok(),
-            Self::UnsignedDecimal => value.parse::<u64>().ok().map(|v| v.rem_euclid(256) as u8),
-            Self::SignedDecimal => value.parse::<i8>().ok().map(|v| v as u8),
-            Self::Float => string_to_float8(value),
-            Self::Ascii => ascii_string_to_byte(value),
+            Self::Register => Err(MaybeRichError::from("Register labels cannot be edited.")),
+            Self::Binary => parse_binary_byte(value),
+            Self::Hex => parse_hex_byte(value),
+            Self::UnsignedDecimal => parse_unsigned_decimal_byte(value),
+            Self::SignedDecimal => parse_signed_decimal_byte(value),
+            Self::Float => parse_float8_byte(value),
+            Self::Ascii => parse_ascii_byte(value),
         };
 
-        if let Some(parsed) = parsed {
-            *row = parsed;
-            true
-        } else {
-            false
-        }
+        *row = parsed?;
+        Ok(())
     }
 }
 
@@ -459,23 +483,21 @@ impl TableColumn<u8, MemoryTableContext<'_>> for MemoryColumn {
         row: &mut u8,
         value: &str,
         _context: &MemoryTableContext<'_>,
-    ) -> bool {
+    ) -> Result<(), MaybeRichError> {
         let parsed = match self {
-            Self::Address | Self::Instruction => None,
-            Self::Binary => u8::from_str_radix(value, 2).ok(),
-            Self::Hex => u8::from_str_radix(value, 16).ok(),
-            Self::UnsignedDecimal => value.parse::<u64>().ok().map(|v| v.rem_euclid(256) as u8),
-            Self::SignedDecimal => value.parse::<i8>().ok().map(|v| v as u8),
-            Self::Float => string_to_float8(value),
-            Self::Ascii => ascii_string_to_byte(value),
+            Self::Address | Self::Instruction => {
+                Err(MaybeRichError::from("This column cannot be edited."))
+            }
+            Self::Binary => parse_binary_byte(value),
+            Self::Hex => parse_hex_byte(value),
+            Self::UnsignedDecimal => parse_unsigned_decimal_byte(value),
+            Self::SignedDecimal => parse_signed_decimal_byte(value),
+            Self::Float => parse_float8_byte(value),
+            Self::Ascii => parse_ascii_byte(value),
         };
 
-        if let Some(parsed) = parsed {
-            *row = parsed;
-            true
-        } else {
-            false
-        }
+        *row = parsed?;
+        Ok(())
     }
 }
 
@@ -487,6 +509,7 @@ impl App {
                 &REGISTER_COLUMNS,
                 self.emulator_state.get_all_registers_mut(),
                 &mut self.ui_state.register_table_state,
+                &mut self.ui_state.message,
                 &(),
             )
             .row_height(14.0)
@@ -542,6 +565,7 @@ impl App {
                             &MEMORY_COLUMNS,
                             self.emulator_state.get_all_memory_mut(),
                             &mut self.ui_state.memory_table_state,
+                            &mut self.ui_state.message,
                             &context,
                         )
                         .row_height(20.0)
@@ -599,46 +623,92 @@ fn byte_to_ascii(byte: u8) -> String {
     }
 }
 
-fn ascii_string_to_byte(s: &str) -> Option<u8> {
-    if s.len() == 1 {
-        Some(s.as_bytes()[0])
+fn parse_binary_byte(value: &str) -> Result<u8, MaybeRichError> {
+    u8::from_str_radix(value, 2)
+        .map_err(|err| MaybeRichError::from(format!("Invalid binary byte '{value}': {err}")))
+}
+
+fn parse_hex_byte(value: &str) -> Result<u8, MaybeRichError> {
+    u8::from_str_radix(value, 16)
+        .map_err(|err| MaybeRichError::from(format!("Invalid hexadecimal byte '{value}': {err}")))
+}
+
+fn parse_unsigned_decimal_byte(value: &str) -> Result<u8, MaybeRichError> {
+    value
+        .parse::<u64>()
+        .map(|v| v.rem_euclid(256) as u8)
+        .map_err(|err| {
+            MaybeRichError::from(format!("Invalid unsigned decimal byte '{value}': {err}"))
+        })
+}
+
+fn parse_signed_decimal_byte(value: &str) -> Result<u8, MaybeRichError> {
+    value.parse::<i8>().map(|v| v as u8).map_err(|err| {
+        MaybeRichError::from(format!("Invalid signed decimal byte '{value}': {err}"))
+    })
+}
+
+fn parse_float8_byte(value: &str) -> Result<u8, MaybeRichError> {
+    string_to_float8(value)
+        .map_err(|err| MaybeRichError::from(format!("Invalid float8 value '{value}': {err}")))
+}
+
+fn parse_ascii_byte(value: &str) -> Result<u8, MaybeRichError> {
+    ascii_string_to_byte(value).map_err(MaybeRichError::from)
+}
+
+fn ascii_string_to_byte(s: &str) -> Result<u8, String> {
+    if s.chars().count() == 1 {
+        let character = s
+            .chars()
+            .next()
+            .expect("single-char strings have a first char");
+        if character.is_ascii() {
+            Ok(character as u8)
+        } else {
+            Err(format!("'{s}' is not an ASCII character."))
+        }
+    } else if s.is_empty() {
+        Err("Enter a single ASCII character or control-code name.".to_owned())
     } else {
         match s {
-            "NUL" => Some(0),
-            "SOH" => Some(1),
-            "STX" => Some(2),
-            "ETX" => Some(3),
-            "EOT" => Some(4),
-            "ENQ" => Some(5),
-            "ACK" => Some(6),
-            "BEL" => Some(7),
-            "BS" => Some(8),
-            "HT" => Some(9),
-            "LF" => Some(10),
-            "VT" => Some(11),
-            "FF" => Some(12),
-            "CR" => Some(13),
-            "SO" => Some(14),
-            "SI" => Some(15),
-            "DLE" => Some(16),
-            "DC1" => Some(17),
-            "DC2" => Some(18),
-            "DC3" => Some(19),
-            "DC4" => Some(20),
-            "NAK" => Some(21),
-            "SYN" => Some(22),
-            "ETB" => Some(23),
-            "CAN" => Some(24),
-            "EM" => Some(25),
-            "SUB" => Some(26),
-            "ESC" => Some(27),
-            "FS" => Some(28),
-            "GS" => Some(29),
-            "RS" => Some(30),
-            "US" => Some(31),
-            "SP" => Some(32),
-            "DEL" => Some(127),
-            _ => None,
+            "NUL" => Ok(0),
+            "SOH" => Ok(1),
+            "STX" => Ok(2),
+            "ETX" => Ok(3),
+            "EOT" => Ok(4),
+            "ENQ" => Ok(5),
+            "ACK" => Ok(6),
+            "BEL" => Ok(7),
+            "BS" => Ok(8),
+            "HT" => Ok(9),
+            "LF" => Ok(10),
+            "VT" => Ok(11),
+            "FF" => Ok(12),
+            "CR" => Ok(13),
+            "SO" => Ok(14),
+            "SI" => Ok(15),
+            "DLE" => Ok(16),
+            "DC1" => Ok(17),
+            "DC2" => Ok(18),
+            "DC3" => Ok(19),
+            "DC4" => Ok(20),
+            "NAK" => Ok(21),
+            "SYN" => Ok(22),
+            "ETB" => Ok(23),
+            "CAN" => Ok(24),
+            "EM" => Ok(25),
+            "SUB" => Ok(26),
+            "ESC" => Ok(27),
+            "FS" => Ok(28),
+            "GS" => Ok(29),
+            "RS" => Ok(30),
+            "US" => Ok(31),
+            "SP" => Ok(32),
+            "DEL" => Ok(127),
+            _ => Err(format!(
+                "'{s}' is not a valid ASCII control-code name. Use a single ASCII character or one of NUL, SOH, STX, ETX, EOT, ENQ, ACK, BEL, BS, HT, LF, VT, FF, CR, SO, SI, DLE, DC1, DC2, DC3, DC4, NAK, SYN, ETB, CAN, EM, SUB, ESC, FS, GS, RS, US, SP, DEL."
+            )),
         }
     }
 }

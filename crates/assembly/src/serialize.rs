@@ -27,8 +27,24 @@ fn perform_arithmetic<'b>(
         ArithmeticOperator::Add => left_val.wrapping_add(right_val),
         ArithmeticOperator::Subtract => left_val.wrapping_sub(right_val),
         ArithmeticOperator::Multiply => left_val.wrapping_mul(right_val),
-        ArithmeticOperator::Divide => left_val.wrapping_div(right_val),
-        ArithmeticOperator::Modulo => left_val.wrapping_rem(right_val),
+        ArithmeticOperator::Divide => {
+            if right_val == 0 {
+                return Err(SerializationErrorMessage::InvalidOperand(
+                    "Division by zero in constant expression".to_string(),
+                )
+                .with_span(operator.span));
+            }
+            left_val.wrapping_div(right_val)
+        }
+        ArithmeticOperator::Modulo => {
+            if right_val == 0 {
+                return Err(SerializationErrorMessage::InvalidOperand(
+                    "Modulo by zero in constant expression".to_string(),
+                )
+                .with_span(operator.span));
+            }
+            left_val.wrapping_rem(right_val)
+        }
     })
 }
 

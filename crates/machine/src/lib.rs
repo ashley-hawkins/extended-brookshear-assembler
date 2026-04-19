@@ -11,12 +11,22 @@ pub enum BrookshearMachineError {
     MemoryAccessOutOfBounds(u8),
     #[error("Reached end of memory without halting")]
     EndOfMemory,
+    #[error("Unrepresentable float8 result while executing instruction at PC {pc:02X}: {value}")]
+    UnrepresentableFloatResult { pc: u8, value: f32 },
 }
 
 pub enum ControlFlow {
     Continue,
     Jump(u8),
     Halt,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Float8ParseError {
+    #[error("Failed to parse float: {0}")]
+    InvalidFloat(#[from] std::num::ParseFloatError),
+    #[error("Float value {value} cannot be represented in Brookshear float8 format")]
+    Unrepresentable { value: f32 },
 }
 
 use serde_big_array::BigArray;
@@ -365,10 +375,18 @@ impl BrookshearMachine {
                     .wrapping_add(self.registers[operand2.as_index() as usize]);
             }
             StructuredInstruction::AddRegToRegFloat(dest, operand1, operand2) => {
-                self.registers[dest.as_index() as usize] = float8_add(
+                self.registers[dest.as_index() as usize] = try_float8_add(
                     self.registers[operand1.as_index() as usize],
                     self.registers[operand2.as_index() as usize],
-                );
+                )
+                .map_err(|err| match err {
+                    Float8ParseError::Unrepresentable { value } => {
+                        BrookshearMachineError::UnrepresentableFloatResult { pc: self.pc, value }
+                    }
+                    Float8ParseError::InvalidFloat(_) => {
+                        unreachable!("float8 register values always decode to valid f32 values")
+                    }
+                })?;
             }
             StructuredInstruction::OrRegToReg(dest, operand1, operand2) => {
                 self.registers[dest.as_index() as usize] = self.registers
@@ -450,11 +468,10 @@ impl Default for BrookshearMachine {
     }
 }
 
-// TODO: bitwise implementation rather than converting to f32 and back, even though this "works".
-fn float8_add(a: u8, b: u8) -> u8 {
+fn try_float8_add(a: u8, b: u8) -> Result<u8, Float8ParseError> {
     let a_f32 = float8_to_f32(a);
     let b_f32 = float8_to_f32(b);
-    f32_to_float8(a_f32 + b_f32)
+    try_f32_to_float8(a_f32 + b_f32)
 }
 
 pub fn float8_to_f32(flt: u8) -> f32 {
@@ -464,9 +481,13 @@ pub fn float8_to_f32(flt: u8) -> f32 {
     sign * (mantissa as f32) * f32::exp2(exp as f32 - ((1 << 2) as f32) - 4.0)
 }
 
-pub fn f32_to_float8(flt: f32) -> u8 {
+pub fn try_f32_to_float8(flt: f32) -> Result<u8, Float8ParseError> {
     if flt == 0.0 {
-        return 0;
+        return Ok(0);
+    }
+
+    if !flt.is_finite() {
+        return Err(Float8ParseError::Unrepresentable { value: flt });
     }
 
     let sign = if flt < 0.0 { 0b1000_0000 } else { 0 };
@@ -475,19 +496,32 @@ pub fn f32_to_float8(flt: f32) -> u8 {
     let mantissa = (abs_flt / f32::exp2(exp as f32 - ((1 << 2) as f32) - 4.0)).round() as u8;
 
     if !(0b000..0b1000).contains(&exp) || mantissa > 0b1111 {
-        panic!(
-            "Todo: Graceful handling. Got float8 value that can't be represented: {}. Reason: exponent out of range or mantissa too large (e={}, m={})",
-            flt, exp, mantissa
-        );
+        return Err(Float8ParseError::Unrepresentable { value: flt });
     }
 
-    sign | ((exp & 0b0111) << 4) | (mantissa & 0b0000_1111)
+    Ok(sign | ((exp & 0b0111) << 4) | (mantissa & 0b0000_1111))
+}
+
+pub fn f32_to_float8(flt: f32) -> u8 {
+    match try_f32_to_float8(flt) {
+        Ok(value) => value,
+        Err(Float8ParseError::Unrepresentable { .. }) => {
+            panic!(
+                "Todo: Graceful handling. Got float8 value that can't be represented: {}",
+                flt
+            )
+        }
+        Err(Float8ParseError::InvalidFloat(_)) => {
+            unreachable!("f32 inputs are always syntactically valid")
+        }
+    }
 }
 
 pub fn float8_to_string(flt: u8) -> String {
     float8_to_f32(flt).to_string()
 }
 
-pub fn string_to_float8(s: &str) -> Option<u8> {
-    s.parse::<f32>().ok().map(f32_to_float8)
+pub fn string_to_float8(s: &str) -> Result<u8, Float8ParseError> {
+    let parsed = s.parse::<f32>()?;
+    try_f32_to_float8(parsed)
 }

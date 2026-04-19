@@ -42,13 +42,25 @@ struct MessageState {
     rich_text: Option<MyRichText>,
 }
 
-struct MaybeRichError {
+impl MessageState {
+    fn set_message(&mut self, message: impl Into<String>) {
+        self.text = message.into();
+        self.rich_text = None;
+    }
+
+    fn set_maybe_rich_message(&mut self, error: MaybeRichError) {
+        self.text = error.message;
+        self.rich_text = error.rich_text;
+    }
+}
+
+pub(super) struct MaybeRichError {
     message: String,
     rich_text: Option<MyRichText>,
 }
 
 impl MaybeRichError {
-    fn new(message: impl Into<String>, rich_text: MyRichText) -> Self {
+    pub(super) fn new(message: impl Into<String>, rich_text: MyRichText) -> Self {
         Self {
             message: message.into(),
             rich_text: Some(rich_text),
@@ -311,18 +323,31 @@ impl App {
     }
 
     fn set_message(&mut self, message: impl Into<String>) {
-        self.ui_state.message.text = message.into();
-        self.ui_state.message.rich_text = None;
+        self.ui_state.message.set_message(message);
     }
 
     fn set_maybe_rich_message(&mut self, error: MaybeRichError) {
-        self.ui_state.message.text = error.message;
-        self.ui_state.message.rich_text = error.rich_text;
+        self.ui_state.message.set_maybe_rich_message(error);
     }
 
     fn update_pc_text_buffer(&mut self) {
         self.ui_state.program_counter_input_buffer =
             format!("{:02X}", self.emulator_state.get_pc());
+    }
+
+    fn normalize_program_counter_input(&mut self) {
+        let mut filtered = self
+            .ui_state
+            .program_counter_input_buffer
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .collect::<String>();
+
+        if filtered.len() > 2 {
+            filtered = filtered[filtered.len().saturating_sub(2)..].to_owned();
+        }
+
+        self.ui_state.program_counter_input_buffer = format!("{:0>2}", filtered);
     }
 
     fn set_highlighted_row(&mut self, row: u8) {
@@ -371,10 +396,12 @@ impl App {
                                                         self.emulator_state.get_memory(i as u8)
                                                     })
                                                     .collect();
-                                                helpers::save_file(
+                                                if let Err(err) = helpers::save_file(
                                                     data,
                                                     "Untitled Memory Snapshot.bin",
-                                                );
+                                                ) {
+                                                    self.set_maybe_rich_message(err.into());
+                                                }
                                             }
                                         });
                                         strip.cell(|ui| {
@@ -566,12 +593,14 @@ impl App {
                                     .on_hover_text("Save the bitmap display as a png file")
                                     .clicked()
                                 {
-                                    helpers::render_and_save_image(
+                                    if let Err(err) = helpers::render_and_save_image(
                                         self.emulator_state.get_all_memory()[0x80..0x100]
                                             .try_into()
                                             .unwrap(),
                                         "brookshear_display.png",
-                                    );
+                                    ) {
+                                        self.set_maybe_rich_message(err.into());
+                                    }
                                 }
                             });
                         });
@@ -610,14 +639,7 @@ impl App {
                                         state.store(ui.ctx(), text_edit_id);
                                     }
 
-                                    self.ui_state.program_counter_input_buffer = format!(
-                                        "{:0>2}",
-                                        &self.ui_state.program_counter_input_buffer[self
-                                            .ui_state
-                                            .program_counter_input_buffer
-                                            .len()
-                                            .saturating_sub(2)..]
-                                    );
+                                    self.normalize_program_counter_input();
 
                                     if response.lost_focus()
                                         && ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -723,7 +745,7 @@ impl App {
             {
                 let kind: PendingFileType = *kind;
                 match file_result {
-                    Some((file_name, file_contents)) => {
+                    Some(Ok((file_name, file_contents))) => {
                         self.ui_state.pending_file = None;
                         match kind {
                             PendingFileType::AssembleAndLoad => {
@@ -805,10 +827,15 @@ impl App {
                                             ),
                                         )
                                     })?;
-                                helpers::save_file(result.to_vec(), "Untitled Program.bin");
+                                helpers::save_file(result.to_vec(), "Untitled Program.bin")
+                                    .map_err(MaybeRichError::from)?;
                                 self.set_message("Successfully assembled program.");
                             }
                         }
+                    }
+                    Some(Err(err)) => {
+                        self.ui_state.pending_file = None;
+                        return Err(MaybeRichError::from(err));
                     }
                     None => { /* not received anything yet */ }
                 }
