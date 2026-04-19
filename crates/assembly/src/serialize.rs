@@ -142,9 +142,9 @@ fn serialize_instruction<'a>(
     })
 }
 
-pub fn serialize_program(
-    program: &[Spanned<Line>],
-) -> SerializeResult<Vec<(u8, [(u8, Option<SimpleSpan>); 2])>> {
+pub type SerializedProgram = Vec<(u8, [(u8, Option<SimpleSpan>); 2])>;
+
+pub fn serialize_program(program: &[Spanned<Line>]) -> SerializeResult<SerializedProgram> {
     let mut waiting_labels = HashSet::new();
     let mut constants: HashMap<&str, u8> = HashMap::new();
     let mut pending_constants: HashMap<&str, &ConstantExpr> = HashMap::new();
@@ -203,7 +203,7 @@ pub fn serialize_program(
                             pending_constants.insert(*label, constant_expr);
                         }
                         waiting_labels.clear();
-                        just_set_addr_w_span.insert(None);
+                        just_set_addr_w_span.replace(None);
                         continue;
                     }
                     "DATA" => {
@@ -230,7 +230,7 @@ pub fn serialize_program(
                     }
                     "MOV" | "HALT" | "NOP" | "ADDI" | "ADDF" | "AND" | "OR" | "XOR" | "ROT"
                     | "JMP" | "JMPEQ" | "JMPNE" | "JMPGE" | "JMPLE" | "JMPGT" | "JMPLT" => {
-                        if prev_was_data && !just_set_addr_w_span.is_some() {
+                        if prev_was_data && just_set_addr_w_span.is_none() {
                             {
                                 // start_new_run:
                                 segments.push(std::mem::take(&mut current_segment));
@@ -345,6 +345,9 @@ pub fn serialize_program_from_text_to_text(
 pub fn serialize_program_to_binary(program: &[Spanned<Line>]) -> SerializeResult<[u8; 256]> {
     let serialized = serialize_program(program)?;
     let mut result = [0u8; 256];
+
+    // addr is guaranteed to be less than 256 because addr is a u8
+    #[allow(clippy::indexing_slicing)]
     for (addr, bytes) in serialized {
         result[addr as usize] = bytes[0].0;
         if let Some(b) = result.get_mut(addr as usize + 1) {

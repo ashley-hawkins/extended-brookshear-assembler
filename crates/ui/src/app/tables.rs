@@ -85,6 +85,13 @@ struct SelectableTable<'a, Row, Col, Context> {
     scroll_to_row: Option<usize>,
 }
 
+#[derive(Clone, Copy)]
+struct CellLocation {
+    row: usize,
+    column: usize,
+    row_count: usize,
+}
+
 impl<'a, Row, Col, Context> SelectableTable<'a, Row, Col, Context>
 where
     Col: TableColumn<Row, Context>,
@@ -177,9 +184,11 @@ where
                         render_table_cell(
                             &mut row_ui,
                             self.state,
-                            row_index,
-                            column_index,
-                            row_count,
+                            CellLocation {
+                                row: row_index,
+                                column: column_index,
+                                row_count,
+                            },
                             row,
                             column,
                             self.context,
@@ -194,9 +203,7 @@ where
 fn render_table_cell<Row, Col, Context>(
     row_ui: &mut egui_extras::TableRow<'_, '_>,
     state: &mut EditableTableState,
-    row_index: usize,
-    column_index: usize,
-    row_count: usize,
+    cell: CellLocation,
     row: &mut Row,
     column: Col,
     context: &Context,
@@ -204,12 +211,12 @@ fn render_table_cell<Row, Col, Context>(
     Col: TableColumn<Row, Context>,
 {
     row_ui.col(|ui| {
-        let cell = (row_index, column_index);
-        let is_highlighted_cell = state.highlight.cell() == Some(cell);
+        let cell_coords = (cell.row, cell.column);
+        let is_highlighted_cell = state.highlight.cell() == Some(cell_coords);
 
         if column.is_editable()
             && let Some((cell_being_edited, edit_str)) = &mut state.editing_cell
-            && *cell_being_edited == cell
+            && *cell_being_edited == cell_coords
         {
             let response = ui.text_edit_singleline(edit_str);
             if state.should_grab_focus {
@@ -218,10 +225,10 @@ fn render_table_cell<Row, Col, Context>(
             }
             if response.lost_focus() {
                 if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    let _ = column.try_set(row_index, row, edit_str, context);
+                    let _ = column.try_set(cell.row, row, edit_str, context);
                     state.set_highlighted_cell(
-                        (row_index + 1).min(row_count.saturating_sub(1)),
-                        column_index,
+                        (cell.row + 1).min(cell.row_count.saturating_sub(1)),
+                        cell.column,
                     );
                 }
                 state.editing_cell = None;
@@ -240,13 +247,13 @@ fn render_table_cell<Row, Col, Context>(
                 })
             })
         {
-            state.editing_cell = Some((cell, text));
+            state.editing_cell = Some((cell_coords, text));
             state.should_grab_focus = true;
             return;
         }
 
         ui.centered_and_justified(|ui| {
-            let value = column.display(row_index, row, context);
+            let value = column.display(cell.row, row, context);
             let response = egui::Frame::new()
                 .fill(if is_highlighted_cell {
                     ui.visuals().selection.bg_fill
@@ -264,10 +271,10 @@ fn render_table_cell<Row, Col, Context>(
                 })
                 .inner;
             if response.clicked() {
-                state.set_highlighted_cell(row_index, column_index);
+                state.set_highlighted_cell(cell.row, cell.column);
             }
             if column.is_editable() && response.double_clicked() {
-                state.editing_cell = Some((cell, value));
+                state.editing_cell = Some((cell_coords, value));
                 state.should_grab_focus = true;
             }
         });

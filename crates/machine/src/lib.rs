@@ -72,10 +72,6 @@ mod undo {
                 self.entries.remove(0);
             }
         }
-
-        pub fn limit(&self) -> usize {
-            self.limit
-        }
     }
 
     impl BrookshearMachine {
@@ -101,79 +97,79 @@ mod undo {
             instruction: &StructuredInstruction,
         ) -> Option<undo::InverseSideEffect> {
             match instruction {
-                StructuredInstruction::MovMemToReg(addr, register) => {
+                StructuredInstruction::MovMemToReg(_addr, register) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *register,
                         old_value: self.registers[register.as_index() as usize],
                     })
                 }
-                StructuredInstruction::MovImmToReg(_, register) => {
+                StructuredInstruction::MovImmToReg(_val, register) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *register,
                         old_value: self.registers[register.as_index() as usize],
                     })
                 }
-                StructuredInstruction::MovRegToMem(register, addr) => {
+                StructuredInstruction::MovRegToMem(_register, addr) => {
                     Some(undo::InverseSideEffect::MemoryWrite {
                         address: *addr,
                         old_value: self.memory[*addr as usize],
                     })
                 }
-                StructuredInstruction::MovRegToReg { src, dst } => {
+                StructuredInstruction::MovRegToReg { src: _, dst } => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dst,
                         old_value: self.registers[dst.as_index() as usize],
                     })
                 }
-                StructuredInstruction::MovIndirectToReg { dst, src } => {
+                StructuredInstruction::MovIndirectToReg { dst, src: _ } => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dst,
                         old_value: self.registers[dst.as_index() as usize],
                     })
                 }
-                StructuredInstruction::MovRegToIndirect { src, dst } => {
+                StructuredInstruction::MovRegToIndirect { src: _, dst } => {
                     Some(undo::InverseSideEffect::MemoryWrite {
                         address: self.registers[dst.as_index() as usize],
                         old_value: self.memory[self.registers[dst.as_index() as usize] as usize],
                     })
                 }
-                StructuredInstruction::AddRegToRegInteger(dest, operand1, operand2) => {
+                StructuredInstruction::AddRegToRegInteger(dest, _operand1, _operand22) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dest,
                         old_value: self.registers[dest.as_index() as usize],
                     })
                 }
-                StructuredInstruction::AddRegToRegFloat(dest, operand1, operand2) => {
+                StructuredInstruction::AddRegToRegFloat(dest, _operand1, _operand22) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dest,
                         old_value: self.registers[dest.as_index() as usize],
                     })
                 }
-                StructuredInstruction::OrRegToReg(dest, operand1, operand2) => {
+                StructuredInstruction::OrRegToReg(dest, _operand1, _operand2) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dest,
                         old_value: self.registers[dest.as_index() as usize],
                     })
                 }
-                StructuredInstruction::AndRegToReg(dest, operand1, operand2) => {
+                StructuredInstruction::AndRegToReg(dest, _operand1, _operand2) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dest,
                         old_value: self.registers[dest.as_index() as usize],
                     })
                 }
-                StructuredInstruction::XorRegToReg(dest, operand1, operand2) => {
+                StructuredInstruction::XorRegToReg(dest, _operand1, _operand2) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dest,
                         old_value: self.registers[dest.as_index() as usize],
                     })
                 }
-                StructuredInstruction::RotRegRight(dest, amount) => {
+                StructuredInstruction::RotRegRight(dest, _amount) => {
                     Some(undo::InverseSideEffect::RegisterWrite {
                         register: *dest,
                         old_value: self.registers[dest.as_index() as usize],
                     })
                 }
-                StructuredInstruction::JmpIfEqual(dest, addr) => None,
+                StructuredInstruction::JmpIfEqual(_dest, _addr) => None,
                 StructuredInstruction::Halt => None,
                 StructuredInstruction::JumpWithComparison(_, _, _) => None,
                 StructuredInstruction::Nop => None,
