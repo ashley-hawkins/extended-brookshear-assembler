@@ -6,13 +6,10 @@ use std::time;
 #[cfg(target_arch = "wasm32")]
 use web_time as time;
 
-use brookshear_assembly::{
-    common::Register,
-    errors::{parse_errors_to_string, semantic_errors_to_string},
-};
+use brookshear_assembly::errors::{parse_errors_to_string, semantic_errors_to_string};
 use brookshear_machine::BrookshearMachine;
-use egui::{Align, Button, Frame, Label, Layout, RadioButton, ScrollArea, Slider, TextEdit};
-use egui_extras::{Column, Size, StripBuilder};
+use egui::{Align, Button, Frame, Label, Layout, RadioButton, Slider, TextEdit};
+use egui_extras::{Size, StripBuilder};
 
 use crate::{
     ansi::MyRichText,
@@ -231,7 +228,6 @@ pub struct App {
     emulator_next_action: EmulatorAction,
     display_on: bool,
     descriptive_disassembly: bool,
-    highlighted_row: u8,
     instructions_per_second: f64,
     windows: AppWindows,
     #[serde(skip)]
@@ -282,7 +278,7 @@ impl App {
             ));
         }
         self.update_pc_text_buffer();
-        self.highlighted_row = self.emulator_state.get_pc();
+        self.set_highlighted_row(self.emulator_state.get_pc());
         res
     }
 
@@ -297,7 +293,7 @@ impl App {
             self.set_message("No more steps to undo.");
         }
         self.update_pc_text_buffer();
-        self.highlighted_row = self.emulator_state.get_pc();
+        self.set_highlighted_row(self.emulator_state.get_pc());
     }
 
     fn cont(&mut self) {
@@ -327,6 +323,13 @@ impl App {
     fn update_pc_text_buffer(&mut self) {
         self.ui_state.program_counter_input_buffer =
             format!("{:02X}", self.emulator_state.get_pc());
+    }
+
+    fn set_highlighted_row(&mut self, row: u8) {
+        self.ui_state
+            .memory_table_state
+            .set_highlighted_row(usize::from(row));
+        self.ui_state.register_table_state.clear_highlight();
     }
 
     fn render_memory_buttons(&mut self, ui: &mut egui::Ui) {
@@ -624,7 +627,7 @@ impl App {
                                         )
                                     {
                                         self.emulator_state.set_pc(val);
-                                        self.highlighted_row = val;
+                                        self.set_highlighted_row(val);
                                     }
                                 });
                                 ui.take_available_space();
@@ -641,7 +644,7 @@ impl App {
                                     self.emulator_state.reset_registers();
                                     self.emulator_instructions_executed = 0;
                                     self.update_pc_text_buffer();
-                                    self.highlighted_row = self.emulator_state.get_pc();
+                                    self.set_highlighted_row(self.emulator_state.get_pc());
                                 }
                             });
                             strip.cell(|ui| {

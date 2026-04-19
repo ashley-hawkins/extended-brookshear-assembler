@@ -295,8 +295,16 @@ impl BrookshearMachine {
         &self.memory
     }
 
+    pub fn get_all_memory_mut(&mut self) -> &mut [u8; 256] {
+        &mut self.memory
+    }
+
     pub fn get_register(&self, reg: Register) -> u8 {
         self.registers[reg.as_index() as usize]
+    }
+
+    pub fn get_all_registers_mut(&mut self) -> &mut [u8; 16] {
+        &mut self.registers
     }
 
     pub fn get_register_mut(&mut self, reg: Register) -> &mut u8 {
