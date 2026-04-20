@@ -554,7 +554,6 @@ impl App {
                 &mut self.ui_state.message,
                 &(),
             )
-            .row_height(14.0)
             .min_scrolled_height(80.0)
             .show(ui);
         });
