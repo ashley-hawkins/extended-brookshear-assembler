@@ -43,7 +43,5 @@ It is a work in progress. It will have better error messages and usability once 
 
 Maybe:
 
-- Button to clear the display?
-- Button to load an image into the display?
 - A way to uncap the speed of the emulator?
 - A way to lock the display so you don't accidentally modify it by clicking on it
