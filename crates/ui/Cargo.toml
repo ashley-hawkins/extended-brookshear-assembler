@@ -32,6 +32,7 @@ anstyle-parse = "1.0.0"
 egui_commonmark = { features = [
     "macros",
 ], git = "https://github.com/ashley-hawkins/egui_commonmark.git", rev = "710c2e6d93be27e6323632958097e7e329e76d76" }
+image = { version = "0.25.10", default-features = false }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -43,5 +44,11 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 wasm-bindgen-futures = "0.4.50"
 web-time = "1.1.0"
 js-sys = "0.3.92"
-web-sys = "0.3.70"              # to access the DOM (to hide the loading text)
+web-sys = { version = "0.3.70", features = [
+    "CanvasRenderingContext2d",
+    "Document",
+    "HtmlCanvasElement",
+    "ImageData",
+    "Window",
+] }
 log = "0.4.27"

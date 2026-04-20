@@ -17,7 +17,7 @@ use crate::{
         tables::EditableTableState,
         windows::{AppWindows, HelpPage, WindowOpenId},
     },
-    helpers::{self, FileReceiver, open_file},
+    helpers::{self, DisplayImageReceiver, FileReceiver, open_file},
 };
 
 #[derive(Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -34,6 +34,7 @@ enum PendingFileType {
     LoadMemory,
     AssembleAndLoad,
     AssembleToFile,
+    LoadDisplayImage,
 }
 
 #[derive(Default)]
@@ -86,6 +87,7 @@ impl From<&str> for MaybeRichError {
 type PendingFile = (PendingFileType, FileReceiver);
 
 type MaybePendingFile = Option<PendingFile>;
+type MaybePendingDisplayImage = Option<DisplayImageReceiver>;
 
 #[derive(Default)]
 struct AppUiState {
@@ -96,6 +98,7 @@ struct AppUiState {
     last_instruction_time: Option<time::Instant>,
     duration_to_account_for: std::time::Duration,
     pending_file: MaybePendingFile,
+    pending_display_image: MaybePendingDisplayImage,
     last_frame_time: std::time::Duration,
     wants_to_jump_to_address: Option<u8>,
     jump_to_address_input_buffer: String,
@@ -676,7 +679,7 @@ impl App {
                 .size(Size::remainder())
                 .horizontal(|mut strip| {
                     strip.strip(|builder| {
-                        builder.sizes(Size::remainder(), 2).vertical(|mut strip| {
+                        builder.sizes(Size::remainder(), 3).vertical(|mut strip| {
                             strip.cell(|ui| {
                                 egui::Frame::new()
                                     .fill(ui.visuals().faint_bg_color)
@@ -710,6 +713,21 @@ impl App {
                                     ) {
                                         self.set_maybe_rich_message(err.into());
                                     }
+                                }
+                            });
+                            strip.cell(|ui| {
+                                if ui
+                                    .add_sized(ui.available_size(), Button::new("Load Image"))
+                                    .on_hover_text(
+                                        "Load a 32x32 two-color PNG into the display memory region",
+                                    )
+                                    .clicked()
+                                {
+                                    let handle_receiver = open_file();
+                                    self.ui_state.pending_file = Some((
+                                        PendingFileType::LoadDisplayImage,
+                                        handle_receiver,
+                                    ));
                                 }
                             });
                         });
@@ -765,7 +783,7 @@ impl App {
                             });
                     });
                     strip.strip(|builder| {
-                        builder.sizes(Size::remainder(), 2).vertical(|mut strip| {
+                        builder.sizes(Size::remainder(), 3).vertical(|mut strip| {
                             strip.cell(|ui| {
                                 if ui
                                     .add_sized(ui.available_size(), Button::new("Reset"))
@@ -793,6 +811,20 @@ impl App {
                                     .clicked()
                                 {
                                     self.display_on = !self.display_on;
+                                }
+                            });
+                            strip.cell(|ui| {
+                                let response = ui
+                                    .add_sized(ui.available_size(), Button::new("Clear Display"))
+                                    .on_hover_text(
+                                        "Left-click to clear the display to black. Right-click to fill the display white.",
+                                    );
+
+                                if response.clicked() {
+                                    self.emulator_state.get_all_memory_mut()[0x80..0x100].fill(0);
+                                } else if response.secondary_clicked() {
+                                    self.emulator_state.get_all_memory_mut()[0x80..0x100]
+                                        .fill(0xFF);
                                 }
                             });
                         });
@@ -912,10 +944,32 @@ impl App {
                                     .map_err(MaybeRichError::from)?;
                                 self.set_message("Successfully assembled program.");
                             }
+                            PendingFileType::LoadDisplayImage => {
+                                self.ui_state.pending_display_image =
+                                    Some(helpers::decode_display_image_async(file_contents));
+                            }
                         }
                     }
                     Some(Err(err)) => {
                         self.ui_state.pending_file = None;
+                        return Err(MaybeRichError::from(err));
+                    }
+                    None => { /* not received anything yet */ }
+                }
+            }
+
+            if let Some(handle) = &mut self.ui_state.pending_display_image
+                && let Ok(image_result) = handle.try_recv()
+            {
+                match image_result {
+                    Some(Ok(display)) => {
+                        self.ui_state.pending_display_image = None;
+                        self.emulator_state.get_all_memory_mut()[0x80..0x100]
+                            .copy_from_slice(&display);
+                        self.set_message("Successfully loaded display image.");
+                    }
+                    Some(Err(err)) => {
+                        self.ui_state.pending_display_image = None;
                         return Err(MaybeRichError::from(err));
                     }
                     None => { /* not received anything yet */ }
