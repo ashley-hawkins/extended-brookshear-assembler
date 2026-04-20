@@ -247,7 +247,10 @@ fn render_table_cell<Row, Col, Context>(
                 state.should_grab_focus = false;
             }
             if response.lost_focus() {
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                let pressed_enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let pressed_escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+
+                if pressed_enter {
                     match column.try_set(cell.row, row, edit_str, context) {
                         Ok(()) => {
                             message_state.set_message(String::new());
@@ -266,6 +269,9 @@ fn render_table_cell<Row, Col, Context>(
                 }
                 if !state.should_grab_focus {
                     state.editing_cell = None;
+                    if pressed_escape {
+                        state.defer_focus_highlighted_cell();
+                    }
                 }
             }
             return;
