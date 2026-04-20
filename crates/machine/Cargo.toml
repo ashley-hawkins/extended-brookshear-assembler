@@ -7,9 +7,9 @@ license.workspace = true
 
 [dependencies]
 brookshear_assembly = { version = "0.1.0", path = "../assembly" }
+thiserror.workspace = true
 serde.workspace = true
 serde-big-array = "0.5.1"
-thiserror = "2.0.18"
 
 [features]
 undo = []

@@ -5,10 +5,10 @@ package.license = "GPL-3.0-only"
 resolver = "3"
 
 [workspace.dependencies]
-serde = { version = "1.0.219", features = ["derive"] }
-regex = "1.12.3"
-strum = { version = "0.28.0", features = ["derive"] }
-thiserror = "2.0.18"
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+regex = { version = "1.12.3", default-features = false }
+strum = { version = "0.28.0", default-features = false, features = ["derive"] }
+thiserror = { version = "2.0.18", default-features = false }
 
 [profile.release]
 opt-level = "z" # fast and small wasm

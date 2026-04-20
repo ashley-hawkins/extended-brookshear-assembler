@@ -7,4 +7,4 @@ license.workspace = true
 
 [dependencies]
 brookshear_assembly = { version = "0.1.0", path = "../assembly" }
-clap = { version = "4.6.0", features = ["derive"] }
+clap = { version = "4.6.0", default-features = false, features = ["std", "derive"] }

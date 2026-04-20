@@ -26,9 +26,9 @@ eframe = { version = "0.34.1", default-features = false, features = [
 
 # You only need serde if you want app persistence:
 serde.workspace = true
-rfd = "0.17.2"
-futures = "0.3.32"
-anstyle-parse = "1.0.0"
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+futures = { version = "0.3.32", default-features = false, features = ["alloc"] }
+anstyle-parse = { version = "1.0.0", default-features = false, features = ["utf8"] }
 egui_commonmark = { features = [
     "macros",
 ], git = "https://github.com/ashley-hawkins/egui_commonmark.git", rev = "710c2e6d93be27e6323632958097e7e329e76d76" }
@@ -36,15 +36,15 @@ image = { version = "0.25.10", default-features = false }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = "0.11.8"
+env_logger = { version = "0.11.8", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen-futures = "0.4.50"
-web-time = "1.1.0"
-js-sys = "0.3.92"
-web-sys = { version = "0.3.70", features = [
+wasm-bindgen-futures = { version = "0.4.50", default-features = false }
+web-time = { version = "1.1.0", default-features = false }
+js-sys = { version = "0.3.92", default-features = false }
+web-sys = { version = "0.3.70", default-features = false, features = [
     "CanvasRenderingContext2d",
     "Document",
     "HtmlCanvasElement",
