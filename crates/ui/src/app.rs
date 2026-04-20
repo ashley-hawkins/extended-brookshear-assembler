@@ -8,7 +8,7 @@ use web_time as time;
 
 use brookshear_assembly::errors::{parse_errors_to_string, semantic_errors_to_string};
 use brookshear_machine::BrookshearMachine;
-use egui::{Align, Button, Frame, Label, Layout, RadioButton, Slider, TextEdit};
+use egui::{Align, Button, FontData, FontDefinitions, FontFamily, Frame, Label, Layout, RadioButton, Slider, TextEdit};
 use egui_extras::{Size, StripBuilder};
 
 use crate::{
@@ -254,8 +254,7 @@ pub struct App {
 impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // This is also where you can customize the look and feel of egui using
-        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
+        install_fonts(&cc.egui_ctx);
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
@@ -989,6 +988,27 @@ impl App {
             self.set_maybe_rich_message(err);
         });
     }
+}
+
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::empty();
+    fonts.font_data.insert(
+        "ui".into(),
+        FontData::from_static(include_bytes!("fonts/UbuntuLightSubset.ttf")).into(),
+    );
+    fonts.font_data.insert(
+        "mono".into(),
+        FontData::from_static(include_bytes!("fonts/HackRegularSubset.ttf")).into(),
+    );
+
+    fonts
+        .families
+        .insert(FontFamily::Proportional, vec!["ui".into(), "mono".into()]);
+    fonts
+        .families
+        .insert(FontFamily::Monospace, vec!["mono".into(), "ui".into()]);
+
+    ctx.set_fonts(fonts);
 }
 
 impl eframe::App for App {
