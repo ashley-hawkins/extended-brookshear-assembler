@@ -37,6 +37,7 @@ impl TableHighlight {
 pub struct EditableTableState {
     highlight: TableHighlight,
     should_grab_cell_focus: bool,
+    should_defer_cell_focus: bool,
     editing_cell: Option<((usize, usize), String)>,
     should_grab_focus: bool,
 }
@@ -49,11 +50,13 @@ impl EditableTableState {
     pub fn clear_highlight(&mut self) {
         self.highlight = TableHighlight::None;
         self.should_grab_cell_focus = false;
+        self.should_defer_cell_focus = false;
     }
 
     pub fn set_highlighted_row(&mut self, row: usize) {
         self.highlight = TableHighlight::Row(row);
         self.should_grab_cell_focus = false;
+        self.should_defer_cell_focus = false;
     }
 
     pub fn set_highlighted_cell(&mut self, row: usize, column: usize) {
@@ -62,6 +65,10 @@ impl EditableTableState {
 
     pub fn focus_highlighted_cell(&mut self) {
         self.should_grab_cell_focus = true;
+    }
+
+    pub fn defer_focus_highlighted_cell(&mut self) {
+        self.should_defer_cell_focus = true;
     }
 }
 
@@ -104,6 +111,7 @@ struct CellLocation {
     row: usize,
     column: usize,
     row_count: usize,
+    column_count: usize,
 }
 
 impl<'a, Row, Col, Context> SelectableTable<'a, Row, Col, Context>
@@ -148,6 +156,11 @@ where
 
     fn show(self, ui: &mut egui::Ui) {
         let row_count = self.rows.len();
+
+        if self.state.should_defer_cell_focus {
+            self.state.should_defer_cell_focus = false;
+            self.state.should_grab_cell_focus = true;
+        }
 
         ScrollArea::horizontal().show(ui, |ui| {
             let mut table_builder = egui_extras::TableBuilder::new(ui)
@@ -196,6 +209,7 @@ where
                                 row: row_index,
                                 column: column_index,
                                 row_count,
+                                column_count: self.columns.len(),
                             },
                             row,
                             column,
@@ -286,6 +300,32 @@ fn render_table_cell<Row, Col, Context>(
             if column.is_editable() && response.double_clicked() {
                 state.editing_cell = Some((cell_coords, value));
                 state.should_grab_focus = true;
+            }
+            if is_highlighted_cell && response.has_focus() && state.editing_cell.is_none() {
+                let next_cell = ui.input_mut(|i| {
+                    if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                        Some((cell.row.saturating_sub(1), cell.column))
+                    } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                        Some(((cell.row + 1).min(cell.row_count.saturating_sub(1)), cell.column))
+                    } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+                        Some((cell.row, cell.column.saturating_sub(1)))
+                    } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+                        Some((
+                            cell.row,
+                            (cell.column + 1).min(cell.column_count.saturating_sub(1)),
+                        ))
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some((next_row, next_column)) = next_cell
+                    && (next_row != cell.row || next_column != cell.column)
+                {
+                    state.set_highlighted_cell(next_row, next_column);
+                    state.focus_highlighted_cell();
+                    state.defer_focus_highlighted_cell();
+                }
             }
             if is_highlighted_cell
                 && column.is_editable()
