@@ -430,12 +430,17 @@ impl App {
             .show(ctx, |ui| {
                 ui.label("Paste detected. Would you like to assemble and load this text?");
                 ui.add_space(8.0);
-                ui.add(
-                    TextEdit::multiline(&mut self.ui_state.pasted_program_buffer)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(12)
-                        .code_editor(),
-                );
+                egui::ScrollArea::vertical()
+                    .id_salt("pasted_program_scroll")
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            TextEdit::multiline(&mut self.ui_state.pasted_program_buffer)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(12)
+                                .code_editor(),
+                        );
+                    });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button("Assemble and Load").clicked() {
