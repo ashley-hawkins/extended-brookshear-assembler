@@ -1,6 +1,13 @@
 use std::hash::Hash;
 
-use brookshear_machine::{BrookshearMachine, float8_to_string, string_to_float8};
+use brookshear_assembly::{
+    errors::{parse_errors_to_string, semantic_errors_to_string},
+    parser::parse_asm_file,
+    serialize::serialize_inline_instruction_to_binary,
+    structured_instruction::StructuredInstruction,
+};
+
+use brookshear_machine::{float8_to_string, string_to_float8};
 use egui::{Align, Frame, Layout, ScrollArea};
 use egui_extras::Column;
 
@@ -77,16 +84,16 @@ trait TableColumn<Row, Context>: Copy {
 
     fn column(self) -> Column;
 
-    fn display(self, row_index: usize, row: &Row, context: &Context) -> String;
+    fn display(self, row_index: usize, rows: &[Row], context: &Context) -> String;
 
-    fn is_editable(self) -> bool {
+    fn is_editable(self, _row_index: usize, _rows: &[Row], _context: &Context) -> bool {
         false
     }
 
     fn try_set(
         self,
         _row_index: usize,
-        _row: &mut Row,
+        _rows: &mut [Row],
         _value: &str,
         _context: &Context,
     ) -> Result<(), MaybeRichError> {
@@ -199,7 +206,6 @@ where
                         row_ui.set_selected(true);
                     }
 
-                    let row = &mut self.rows[row_index];
                     for (column_index, column) in self.columns.iter().copied().enumerate() {
                         render_table_cell(
                             &mut row_ui,
@@ -211,7 +217,7 @@ where
                                 row_count,
                                 column_count: self.columns.len(),
                             },
-                            row,
+                            self.rows,
                             column,
                             self.context,
                         );
@@ -227,7 +233,7 @@ fn render_table_cell<Row, Col, Context>(
     state: &mut EditableTableState,
     message_state: &mut MessageState,
     cell: CellLocation,
-    row: &mut Row,
+    rows: &mut [Row],
     column: Col,
     context: &Context,
 ) where
@@ -236,8 +242,9 @@ fn render_table_cell<Row, Col, Context>(
     row_ui.col(|ui| {
         let cell_coords = (cell.row, cell.column);
         let is_highlighted_cell = state.highlight.cell() == Some(cell_coords);
+        let is_editable = column.is_editable(cell.row, rows, context);
 
-        if column.is_editable()
+        if is_editable
             && let Some((cell_being_edited, edit_str)) = &mut state.editing_cell
             && *cell_being_edited == cell_coords
         {
@@ -251,7 +258,7 @@ fn render_table_cell<Row, Col, Context>(
                 let pressed_escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
 
                 if pressed_enter {
-                    match column.try_set(cell.row, row, edit_str, context) {
+                    match column.try_set(cell.row, rows, edit_str, context) {
                         Ok(()) => {
                             message_state.set_message(String::new());
                             state.set_highlighted_cell(
@@ -278,7 +285,7 @@ fn render_table_cell<Row, Col, Context>(
         }
 
         ui.centered_and_justified(|ui| {
-            let value = column.display(cell.row, row, context);
+            let value = column.display(cell.row, rows, context);
             let response = egui::Frame::new()
                 .fill(if is_highlighted_cell {
                     ui.visuals().selection.bg_fill
@@ -303,7 +310,7 @@ fn render_table_cell<Row, Col, Context>(
                 state.set_highlighted_cell(cell.row, cell.column);
                 response.request_focus();
             }
-            if column.is_editable() && response.double_clicked() {
+            if is_editable && response.double_clicked() {
                 state.editing_cell = Some((cell_coords, value));
                 state.should_grab_focus = true;
             }
@@ -312,7 +319,10 @@ fn render_table_cell<Row, Col, Context>(
                     if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                         Some((cell.row.saturating_sub(1), cell.column))
                     } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                        Some(((cell.row + 1).min(cell.row_count.saturating_sub(1)), cell.column))
+                        Some((
+                            (cell.row + 1).min(cell.row_count.saturating_sub(1)),
+                            cell.column,
+                        ))
                     } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
                         Some((cell.row, cell.column.saturating_sub(1)))
                     } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
@@ -334,7 +344,7 @@ fn render_table_cell<Row, Col, Context>(
                 }
             }
             if is_highlighted_cell
-                && column.is_editable()
+                && is_editable
                 && response.has_focus()
                 && state.editing_cell.is_none()
                 && let Some(text) = ui.input(|i| {
@@ -403,26 +413,27 @@ impl TableColumn<u8, ()> for RegisterColumn {
         }
     }
 
-    fn display(self, row_index: usize, row: &u8, _context: &()) -> String {
+    fn display(self, row_index: usize, rows: &[u8], _context: &()) -> String {
+        let row = rows[row_index];
         match self {
             Self::Register => format!("{:X}", row_index),
             Self::Binary => format!("{:08b}", row),
             Self::Hex => format!("{:02X}", row),
             Self::UnsignedDecimal => format!("{}", row),
-            Self::SignedDecimal => format!("{}", *row as i8),
-            Self::Float => float8_to_string(*row),
-            Self::Ascii => byte_to_ascii(*row),
+            Self::SignedDecimal => format!("{}", row as i8),
+            Self::Float => float8_to_string(row),
+            Self::Ascii => byte_to_ascii(row),
         }
     }
 
-    fn is_editable(self) -> bool {
+    fn is_editable(self, _row_index: usize, _rows: &[u8], _context: &()) -> bool {
         !matches!(self, Self::Register)
     }
 
     fn try_set(
         self,
-        _row_index: usize,
-        row: &mut u8,
+        row_index: usize,
+        rows: &mut [u8],
         value: &str,
         _context: &(),
     ) -> Result<(), MaybeRichError> {
@@ -436,7 +447,7 @@ impl TableColumn<u8, ()> for RegisterColumn {
             Self::Ascii => parse_ascii_byte(value),
         };
 
-        *row = parsed?;
+        rows[row_index] = parsed?;
         Ok(())
     }
 }
@@ -464,11 +475,11 @@ const MEMORY_COLUMNS: [MemoryColumn; 8] = [
     MemoryColumn::Instruction,
 ];
 
-struct MemoryTableContext<'a> {
-    instruction_text: &'a [String],
+struct MemoryTableContext {
+    descriptive_disassembly: bool,
 }
 
-impl TableColumn<u8, MemoryTableContext<'_>> for MemoryColumn {
+impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
     fn header(self) -> &'static str {
         match self {
             Self::Address => "Address",
@@ -500,20 +511,21 @@ impl TableColumn<u8, MemoryTableContext<'_>> for MemoryColumn {
         }
     }
 
-    fn display(self, row_index: usize, row: &u8, context: &MemoryTableContext<'_>) -> String {
+    fn display(self, row_index: usize, rows: &[u8], context: &MemoryTableContext) -> String {
+        let row = rows[row_index];
         match self {
             Self::Address => format!("{:02X}", row_index),
             Self::Binary => format!("{:08b}", row),
             Self::Hex => format!("{:02X}", row),
             Self::UnsignedDecimal => format!("{}", row),
-            Self::SignedDecimal => format!("{}", *row as i8),
-            Self::Float => float8_to_string(*row),
-            Self::Ascii => byte_to_ascii(*row),
-            Self::Instruction => context.instruction_text[row_index].clone(),
+            Self::SignedDecimal => format!("{}", row as i8),
+            Self::Float => float8_to_string(row),
+            Self::Ascii => byte_to_ascii(row),
+            Self::Instruction => display_instruction(row_index, rows, context),
         }
     }
 
-    fn is_editable(self) -> bool {
+    fn is_editable(self, row_index: usize, rows: &[u8], context: &MemoryTableContext) -> bool {
         matches!(
             self,
             Self::Binary
@@ -522,29 +534,36 @@ impl TableColumn<u8, MemoryTableContext<'_>> for MemoryColumn {
                 | Self::SignedDecimal
                 | Self::Float
                 | Self::Ascii
-        )
+        ) || matches!(self, Self::Instruction)
+            && !context.descriptive_disassembly
+            && row_index.is_multiple_of(2)
+            && row_index + 1 < rows.len()
     }
 
     fn try_set(
         self,
-        _row_index: usize,
-        row: &mut u8,
+        row_index: usize,
+        rows: &mut [u8],
         value: &str,
-        _context: &MemoryTableContext<'_>,
+        _context: &MemoryTableContext,
     ) -> Result<(), MaybeRichError> {
         let parsed = match self {
-            Self::Address | Self::Instruction => {
-                Err(MaybeRichError::from("This column cannot be edited."))
-            }
+            Self::Address => Err(MaybeRichError::from("This column cannot be edited.")),
             Self::Binary => parse_binary_byte(value),
             Self::Hex => parse_hex_byte(value),
             Self::UnsignedDecimal => parse_unsigned_decimal_byte(value),
             Self::SignedDecimal => parse_signed_decimal_byte(value),
             Self::Float => parse_float8_byte(value),
             Self::Ascii => parse_ascii_byte(value),
+            Self::Instruction => {
+                let [first_byte, second_byte] = parse_instruction_bytes(value)?;
+                rows[row_index] = first_byte;
+                rows[row_index + 1] = second_byte;
+                return Ok(());
+            }
         };
 
-        *row = parsed?;
+        rows[row_index] = parsed?;
         Ok(())
     }
 }
@@ -577,28 +596,8 @@ impl App {
                 usize::from(val)
             });
 
-            let instruction_text = (0..BrookshearMachine::MEMORY_SIZE)
-                .map(|index| {
-                    let address = index as u8;
-                    if !address.is_multiple_of(2) {
-                        return String::new();
-                    }
-
-                    self.emulator_state
-                        .fetch_instruction(address)
-                        .ok()
-                        .map(|instruction| {
-                            if self.descriptive_disassembly {
-                                instruction.describe()
-                            } else {
-                                instruction.disasm()
-                            }
-                        })
-                        .unwrap_or_default()
-                })
-                .collect::<Vec<_>>();
             let context = MemoryTableContext {
-                instruction_text: &instruction_text,
+                descriptive_disassembly: self.descriptive_disassembly,
             };
 
             Frame::group(ui.style())
@@ -668,6 +667,54 @@ fn byte_to_ascii(byte: u8) -> String {
         }
         .to_owned()
     }
+}
+
+fn display_instruction(row_index: usize, rows: &[u8], context: &MemoryTableContext) -> String {
+    if !row_index.is_multiple_of(2) || row_index + 1 >= rows.len() {
+        return String::new();
+    }
+
+    StructuredInstruction::from_bytes([rows[row_index], rows[row_index + 1]])
+        .map(|instruction| {
+            if context.descriptive_disassembly {
+                instruction.describe()
+            } else {
+                instruction.disasm()
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn parse_instruction_bytes(value: &str) -> Result<[u8; 2], MaybeRichError> {
+    let lines = parse_asm_file(value).map_err(|errors| {
+        MaybeRichError::new(
+            "Failed to parse assembly instruction. Click to see details.",
+            crate::ansi::ansi_to_rich_text(&parse_errors_to_string(
+                value,
+                "instruction".to_owned(),
+                &errors,
+            )),
+        )
+    })?;
+
+    if lines.len() != 1 {
+        return Err(MaybeRichError::from(
+            "Only one instruction should be entered.".to_owned(),
+        ));
+    }
+
+    let serialized = serialize_inline_instruction_to_binary(&lines[0]).map_err(|err| {
+        MaybeRichError::new(
+            "Failed to assemble instruction. Click to see details.",
+            crate::ansi::ansi_to_rich_text(&semantic_errors_to_string(
+                value,
+                "instruction".to_owned(),
+                &[err],
+            )),
+        )
+    })?;
+
+    Ok(serialized)
 }
 
 fn parse_binary_byte(value: &str) -> Result<u8, MaybeRichError> {

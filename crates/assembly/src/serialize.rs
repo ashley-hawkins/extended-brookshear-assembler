@@ -11,6 +11,7 @@ use crate::{
     },
 };
 
+#[derive(Default)]
 pub struct Context<'a> {
     constants: HashMap<&'a str, u8>,
 }
@@ -110,7 +111,7 @@ pub enum SerializationErrorMessage {
     #[error("This constant pseudo-instruction does not have a label.")]
     UnlabeledConstant(Option<SimpleSpan>), // span of the last offset if it had just been set
     #[error("{0}")]
-    UnknownError(String),
+    Other(String),
 }
 
 impl SerializationErrorMessage {
@@ -371,6 +372,38 @@ pub fn serialize_program_to_binary(program: &[Spanned<Line>]) -> SerializeResult
         };
     }
     Ok(result)
+}
+
+pub fn serialize_inline_instruction_to_binary<'a>(
+    line: &Spanned<Line<'a>>,
+) -> SerializeResult<[u8; 2]> {
+    let annotation = line.annotation.as_ref();
+    let instr = line.inner.instruction.as_ref().ok_or_else(|| {
+        SerializationErrorMessage::Other(
+            "Expected an instruction in the inline assembly, but found none".to_string(),
+        )
+        .with_span(line.span)
+    })?;
+
+    if let Some(annotation) = annotation {
+        return Err(SerializationErrorMessage::Other(
+            "Annotations are not allowed in the inline assembler".to_string(),
+        )
+        .with_span(annotation.span));
+    }
+
+    if instr.inner.mnemonic.inner.to_uppercase() == "CONST" {
+        return Err(SerializationErrorMessage::Other(
+            "CONST instructions are not allowed in the inline assembler as they'd have no effect"
+                .to_string(),
+        )
+        .with_span(instr.inner.mnemonic.span));
+    }
+
+    match convert_instruction(instr, &Default::default())? {
+        ConvertedInstruction::Code(instr) => Ok(instr.as_bytes()),
+        ConvertedInstruction::Data(_) => Err(SerializationErrorMessage::Other("DATA instructions are not allowed in the inline assembler, edit the memory directly instead.".to_string()).with_span(instr.inner.mnemonic.span)),
+    }
 }
 
 fn evaluate_pending_constants<'a, 'b: 'a>(
