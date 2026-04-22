@@ -90,6 +90,10 @@ trait TableColumn<Row, Context>: Copy {
         false
     }
 
+    fn edit_row_advance(self, _row_index: usize, _rows: &[Row], _context: &Context) -> usize {
+        1
+    }
+
     fn try_set(
         self,
         _row_index: usize,
@@ -258,11 +262,14 @@ fn render_table_cell<Row, Col, Context>(
                 let pressed_escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
 
                 if pressed_enter {
+                    let row_advance = column.edit_row_advance(cell.row, rows, context);
                     match column.try_set(cell.row, rows, edit_str, context) {
                         Ok(()) => {
                             message_state.set_message(String::new());
                             state.set_highlighted_cell(
-                                (cell.row + 1).min(cell.row_count.saturating_sub(1)),
+                                cell.row
+                                    .saturating_add(row_advance)
+                                    .min(cell.row_count.saturating_sub(1)),
                                 cell.column,
                             );
                             state.focus_highlighted_cell();
@@ -538,6 +545,14 @@ impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
             && !context.descriptive_disassembly
             && row_index.is_multiple_of(2)
             && row_index + 1 < rows.len()
+    }
+
+    fn edit_row_advance(self, row_index: usize, rows: &[u8], context: &MemoryTableContext) -> usize {
+        if matches!(self, Self::Instruction) && self.is_editable(row_index, rows, context) {
+            2
+        } else {
+            1
+        }
     }
 
     fn try_set(
