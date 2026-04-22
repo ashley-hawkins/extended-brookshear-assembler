@@ -8,7 +8,10 @@ use web_time as time;
 
 use brookshear_assembly::errors::{parse_errors_to_string, semantic_errors_to_string};
 use brookshear_machine::BrookshearMachine;
-use egui::{Align, Button, FontData, FontDefinitions, FontFamily, Frame, Label, Layout, RadioButton, Slider, TextEdit};
+use egui::{
+    Align, Button, FontData, FontDefinitions, FontFamily, Frame, Label, Layout, RadioButton,
+    Slider, TextEdit,
+};
 use egui_extras::{Size, StripBuilder};
 
 use crate::{
@@ -708,8 +711,7 @@ impl App {
                                     .add_sized(ui.available_size(), Button::new("Save Image"))
                                     .on_hover_text("Save the bitmap display as a png file")
                                     .clicked()
-                                {
-                                    if let Err(err) = helpers::render_and_save_image(
+                                    && let Err(err) = helpers::render_and_save_image(
                                         self.emulator_state.get_all_memory()[0x80..0x100]
                                             .try_into()
                                             .unwrap(),
@@ -717,7 +719,6 @@ impl App {
                                     ) {
                                         self.set_maybe_rich_message(err.into());
                                     }
-                                }
                             });
                             strip.cell(|ui| {
                                 if ui
