@@ -547,7 +547,12 @@ impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
             && row_index + 1 < rows.len()
     }
 
-    fn edit_row_advance(self, row_index: usize, rows: &[u8], context: &MemoryTableContext) -> usize {
+    fn edit_row_advance(
+        self,
+        row_index: usize,
+        rows: &[u8],
+        context: &MemoryTableContext,
+    ) -> usize {
         if matches!(self, Self::Instruction) && self.is_editable(row_index, rows, context) {
             2
         } else {
