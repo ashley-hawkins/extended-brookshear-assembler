@@ -1,6 +1,6 @@
 # Extended Brookshear Machine Emulator {#extended-brookshear-machine-emulator}
 
-This emulator runs the extended Brookshear Machine used by this project.
+This emulator runs an extended Brookshear Machine, based on the machine described in *Computer Science: An Overview, 13th edition*, by J. Glenn Brookshear and extended with four additional instructions and a bitmapped display.
 
 Programs may be entered as raw memory images or assembled from source code. For assembly syntax, see the [assembler help](./asmhelp.md).
 

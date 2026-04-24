@@ -1,6 +1,6 @@
 # Extended Brookshear Machine Assembler
 
-This assembler targets the extended Brookshear Machine used by this project.
+This assembler targets an extended Brookshear Machine, based on the machine described in _Computer Science: An Overview, 13th edition_, by J. Glenn Brookshear and extended with four additional instructions.
 
 For emulator and UI details, see the [general help](./bmhelp.md).
 
@@ -312,4 +312,4 @@ This example shows:
 - immediate binary literals
 - indirect memory stores with `MOV R2 -> [R1]`
 
-The fully-commented version is in the link above.
+The fully-commented version is in the link above, and there are more examples within that folder.
