@@ -1,0 +1,4 @@
+// JBrookshearMachine will erroneously fail to assemble this
+mov halt -> R0
+jmp R0
+halt: halt

@@ -9,8 +9,8 @@ use web_time as time;
 use brookshear_assembly::errors::{parse_errors_to_string, semantic_errors_to_string};
 use brookshear_machine::BrookshearMachine;
 use egui::{
-    Align, Button, FontData, FontDefinitions, FontFamily, Frame, Label, Layout, RadioButton,
-    Slider, TextEdit,
+    Align, Button, FontData, FontDefinitions, FontFamily, FontTweak, Frame, Label, Layout,
+    RadioButton, Slider, TextEdit,
 };
 use egui_extras::{Size, StripBuilder};
 
@@ -1001,13 +1001,43 @@ fn install_fonts(ctx: &egui::Context) {
         "mono".into(),
         FontData::from_static(include_bytes!("fonts/HackRegularSubset.ttf")).into(),
     );
+    fonts.font_data.insert(
+        "emoji".into(),
+        FontData::from_static(include_bytes!("fonts/NotoEmojiRegularSubset.ttf"))
+            .tweak(FontTweak {
+                scale: 0.81,
+                ..Default::default()
+            })
+            .into(),
+    );
+    fonts.font_data.insert(
+        "emoji_icon".into(),
+        FontData::from_static(include_bytes!("fonts/EmojiIconFontSubset.ttf"))
+            .tweak(FontTweak {
+                scale: 0.90,
+                ..Default::default()
+            })
+            .into(),
+    );
 
-    fonts
-        .families
-        .insert(FontFamily::Proportional, vec!["ui".into(), "mono".into()]);
-    fonts
-        .families
-        .insert(FontFamily::Monospace, vec!["mono".into(), "ui".into()]);
+    fonts.families.insert(
+        FontFamily::Proportional,
+        vec![
+            "ui".into(),
+            "emoji".into(),
+            "emoji_icon".into(),
+            "mono".into(),
+        ],
+    );
+    fonts.families.insert(
+        FontFamily::Monospace,
+        vec![
+            "mono".into(),
+            "ui".into(),
+            "emoji".into(),
+            "emoji_icon".into(),
+        ],
+    );
 
     ctx.set_fonts(fonts);
 }

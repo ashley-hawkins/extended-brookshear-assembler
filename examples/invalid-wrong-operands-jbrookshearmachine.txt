@@ -1,0 +1,39 @@
+        // 0 is compared with the counters which count down
+setup:  MOV 0 -> R0
+        // R1 will be the pointer to the current display byte we want to write to
+        MOV 80 -> R1
+        // R2 will be the pattern we want to write to the current display byte
+        MOV 00001111 -> R2
+        // R4 will be a counter so we know when to flip the patern
+        MOV 10 -> R4
+        // After R5 reaches zero, we have drawn all chess board rows and will finish
+        MOV 8 -> R5
+        // R6 is just a constant of value 1 so we can increment registers
+        MOV 1 -> R6
+        // R7 is just a constant of value -1 (FF) so we can decrement registers
+        MOV FF -> R7
+
+        // Write the current pattern to the current display byte
+loop:   MOV R2 -> [R1]
+        // Go to the next display byte
+        ADDI R1, R6
+        // Decrement the counter that tracks the progress through the current row
+        ADDI R4, R7 -> R4
+        // If we've finished the current row, set up for drawing the next row
+        JMPEQ next_band, R4
+        JMP loop
+
+next_band:
+        // Decrement the counter that tracks the total progress
+        // (it will reach zero when we have drawn all the chess board rows)
+        ADDI R5, R7 -> R5
+        // If we're completely done, halt.
+        JMPEQ finish, R5
+        // Reset the counter that tracks progress through current row
+        MOV 10 -> R4
+        // Flip the pattern
+        ROT R2, 4
+        // Continue the loop to draw the next chess board row.
+        JMP loop
+
+finish: HALT

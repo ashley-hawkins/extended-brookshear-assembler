@@ -8,6 +8,10 @@ for file in ./*.md; do
 
   base="$(basename "$file")"
 
+  if [ "$base" = "README.md" ]; then
+    continue
+  fi
+
   pandoc \
     "$file" \
     -f gfm \

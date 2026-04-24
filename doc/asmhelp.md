@@ -272,7 +272,7 @@ Algorithm summary:
 - The program alternates between `00001111` and `11110000` across each row.
 - After writing 16 bytes, it swaps patterns for the next 4-row band.
 
-Excerpt:
+Excerpt, without comments:
 
 ```text
 display_begin:  CONST 80
@@ -281,10 +281,13 @@ rows_per_band:  CONST 4
 bytes_per_band: CONST bytes_per_row * rows_per_band
 band_count:     CONST 8
 
-setup:  MOV display_begin -> R1
+setup:  MOV 0 -> R0
+        MOV display_begin -> R1
         MOV 00001111 -> R2
-        MOV 11110000 -> R3
         MOV bytes_per_band -> R4
+        MOV band_count -> R5
+        MOV 1 -> R6
+        MOV FF -> R7
 
 loop:   MOV R2 -> [R1]
         ADDI R1, R6 -> R1
@@ -293,10 +296,13 @@ loop:   MOV R2 -> [R1]
         JMP loop
 
 next_band:
+        ADDI R5, R7 -> R5
+        JMPEQ finish, R5
         MOV bytes_per_band -> R4
-        MOV R2 -> R8
-        MOV R3 -> R2
-        MOV R8 -> R3
+        ROT R2, 4
+        JMP loop
+
+finish: HALT
 ```
 
 This example shows:
@@ -305,3 +311,5 @@ This example shows:
 - arithmetic expressions such as `bytes_per_row * rows_per_band`
 - immediate binary literals
 - indirect memory stores with `MOV R2 -> [R1]`
+
+The fully-commented version is in the link above.
