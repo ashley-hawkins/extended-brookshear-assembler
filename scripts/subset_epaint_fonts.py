@@ -25,7 +25,7 @@ MONOSPACE_RANGES = [
     "U+1E00-1EFF",  # Latin Extended Additional
 ]
 
-SHARED_EXTRA_CHARS = "◻?✔🗐📋─│┼┆┤▲▶╭┬╮╰┴╯├┌┐"
+SHARED_EXTRA_CHARS = "◻�?✔🗐📋─│┼┆┤▲▶╭┬╮╰┴╯├┌┐"
 EMOJI_EXTRA_CHARS = "✔🗐📋"
 
 FONT_JOBS = [
