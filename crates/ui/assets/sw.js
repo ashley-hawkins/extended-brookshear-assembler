@@ -6,6 +6,7 @@ var filesToCache = [
   './brookshear_ui_bg.wasm',
   './favicon.ico',
   './favicon-192x192.png',
+  './helpers.js'
 ];
 
 /* Start the service worker and cache all of the app's content */
@@ -17,9 +18,9 @@ self.addEventListener('install', function (e) {
   );
 });
 
-async function cachedFetch(request) {
+async function cachedFetch(request, originalResponse) {
   const cache = await caches.open(cacheName);
-  return await cache.match(request);
+  return (await cache.match(request)) || originalResponse;
 }
 
 /* Serve cached content when offline */
