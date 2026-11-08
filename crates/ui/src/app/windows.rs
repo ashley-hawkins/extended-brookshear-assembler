@@ -36,7 +36,7 @@ impl AboutWindow {
             .default_height(150.0)
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
-                    ui.heading("Brookshear Machine Emulator");
+                    ui.heading("Brookshear (Vole) Machine Emulator");
                     ui.label("Created by Ashley Hawkins");
                     ui.label(concat!(
                         "UI layout and extended instructions ",

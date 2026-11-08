@@ -1,6 +1,6 @@
 # Extended Brookshear Machine Assembler {#extended-brookshear-machine-assembler}
 
-This assembler targets an extended Brookshear Machine, based on the machine described in *Computer Science: An Overview, 13th edition*, by J. Glenn Brookshear and extended with four additional instructions.
+This assembler targets an extended instruction set, based on the Vole machine described in Appendix C of *Computer Science: An Overview, 13th edition*, by J. Glenn Brookshear and extended with four additional instructions.
 
 For emulator and UI details, see the [general help](./bmhelp.md).
 

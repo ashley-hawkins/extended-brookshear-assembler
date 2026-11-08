@@ -1,6 +1,6 @@
 # Extended Brookshear Machine Emulator
 
-This emulator runs an extended Brookshear Machine, based on the machine described in _Computer Science: An Overview, 13th edition_, by J. Glenn Brookshear and extended with four additional instructions and a bitmapped display.
+This emulator executes an extended instruction set, based on the Vole machine described in Appendix C of _Computer Science: An Overview, 13th edition_, by J. Glenn Brookshear and extended with four additional instructions and a bitmapped display.
 
 Programs may be entered as raw memory images or assembled from source code. For assembly syntax, see the [assembler help](./asmhelp.md).
 
