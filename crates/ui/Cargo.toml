@@ -13,9 +13,9 @@ targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 [dependencies]
 brookshear_assembly = { path = "../assembly" }
 brookshear_machine = { path = "../machine", features = ["undo"] }
-egui = { version = "0.34.1", default-features = false, features = ["persistence"] }
-egui_extras = { version = "0.34.1", default-features = false }
-eframe = { version = "0.34.1", default-features = false, features = [
+egui = { version = "0.37.0", default-features = false, features = ["persistence"] }
+egui_extras = { version = "0.37.0", default-features = false }
+eframe = { version = "0.37.0", default-features = false, features = [
     "accesskit",     # Make egui compatible with screen readers. NOTE: adds a lot of dependencies.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
@@ -25,29 +25,27 @@ eframe = { version = "0.34.1", default-features = false, features = [
 
 # You only need serde if you want app persistence:
 serde.workspace = true
-rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "0.18.0", default-features = false, features = ["xdg-portal"] }
 futures = { version = "0.3.32", default-features = false, features = ["alloc"] }
 anstyle-parse = { version = "1.0.0", default-features = false, features = ["utf8"] }
-egui_commonmark = { features = [
-    "macros",
-], git = "https://github.com/ashley-hawkins/egui_commonmark.git", rev = "710c2e6d93be27e6323632958097e7e329e76d76" }
+egui_commonmark = { version = "0.26.0", features = ["macros"] }
 image = { version = "0.25.10", default-features = false }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = { version = "0.11.8", default-features = false }
+env_logger = { version = "0.11.11", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen-futures = { version = "0.4.50", default-features = false }
+wasm-bindgen-futures = { version = "0.4.80", default-features = false }
 web-time = { version = "1.1.0", default-features = false }
-js-sys = { version = "0.3.92", default-features = false }
-web-sys = { version = "0.3.70", default-features = false, features = [
+js-sys = { version = "0.3.107", default-features = false }
+web-sys = { version = "0.3.107", default-features = false, features = [
     "CanvasRenderingContext2d",
     "Document",
     "HtmlCanvasElement",
     "ImageData",
     "Window",
 ] }
-log = "0.4.27"
+log = "0.4.35"

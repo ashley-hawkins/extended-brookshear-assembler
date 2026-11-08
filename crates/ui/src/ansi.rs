@@ -88,7 +88,7 @@ impl MyRichText {
 
                     egui::text::LayoutSection {
                         leading_space: 0.0,
-                        byte_range: segment.range.clone(),
+                        byte_range: egui::text::ByteIndex(segment.range.start)..egui::text::ByteIndex(segment.range.end),
                         format: egui::TextFormat {
                             font_id: FontSelection::default().resolve(style),
                             color,

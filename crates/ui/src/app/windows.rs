@@ -154,7 +154,7 @@ impl HelpWindow {
             HelpPage::General => "General Help",
             HelpPage::Assembler => "Assembler Help",
         })
-        .id(egui::Id::new("help_window"))
+        .id(egui::Id::unique("help_window"))
         .open(&mut self.open)
         .resizable(true)
         .collapsible(false)

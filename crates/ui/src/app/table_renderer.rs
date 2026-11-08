@@ -154,7 +154,7 @@ where
     Col: TableColumn<D>,
 {
     pub fn new(
-        id_salt: impl Hash,
+        id_salt: impl Hash + std::fmt::Debug,
         columns: &'a [Col],
         data: &'a mut D,
         state: &'a mut EditableTableState,
@@ -162,7 +162,7 @@ where
         context: &'a Col::Context,
     ) -> Self {
         Self {
-            id: egui::Id::new(id_salt),
+            id: egui::Id::unique(id_salt),
             columns,
             data,
             state,

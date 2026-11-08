@@ -117,7 +117,7 @@ impl InfoPanel {
         egui::Panel::right("right_panel")
             .resizable(false)
             .exact_size(200.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.heading("Information");
                     if ui
@@ -229,7 +229,7 @@ impl InfoPanel {
                     if ui
                         .interact(
                             frame_rect,
-                            "msgbox".into(),
+                            egui::Id::unique("msgbox"),
                             egui::Sense::click() | egui::Sense::hover(),
                         )
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -696,13 +696,7 @@ impl App {
                                 egui::Frame::new()
                                     .fill(ui.visuals().faint_bg_color)
                                     .corner_radius(
-                                        ui.style()
-                                            .button_style(
-                                                egui::widget_style::WidgetState::Active,
-                                                false,
-                                            )
-                                            .frame
-                                            .corner_radius,
+                                        ui.visuals().widgets.active.corner_radius,
                                     )
                                     .show(ui, |ui| {
                                         ui.add_sized(
@@ -1074,7 +1068,7 @@ impl eframe::App for App {
         self.render_paste_dialog(ui.ctx());
 
         InfoPanel::show(self, ui);
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let h = ui.available_height();
             let half_w = ui.available_width() / 2.0;
             ui.allocate_ui_with_layout(
