@@ -58,6 +58,10 @@ mod undo {
         }
 
         pub fn push(&mut self, entry: InverseStep) {
+            if self.limit == 0 {
+                return;
+            }
+
             if self.entries.len() == self.limit {
                 self.entries.remove(0);
             }
