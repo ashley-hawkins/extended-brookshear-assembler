@@ -218,6 +218,78 @@ mod undo {
             }
         }
     }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn undo_with_zero_history_limit() {
+            use Register::*;
+            let mut machine = BrookshearMachine::new();
+            machine.set_history_limit(0);
+            machine.load_memory(brookshear_assembly::infallible_program_str_to_binary(
+                r#"
+MOV 1 -> R0
+MOV 2 -> R0
+HALT
+"#,
+            ));
+            assert_eq!(machine.get_register(R0), 0);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 1);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 2);
+            assert!(!machine.undo_step());
+        }
+
+        #[test]
+        fn simple_undo() {
+            use Register::*;
+            let mut machine = BrookshearMachine::new();
+            machine.set_history_limit(10);
+            machine.load_memory(brookshear_assembly::infallible_program_str_to_binary(
+                r#"
+MOV 1 -> R0
+MOV 2 -> R0
+MOV 3 -> R0
+HALT
+"#,
+            ));
+            assert_eq!(machine.get_register(R0), 0);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 1);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 2);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 3);
+            assert!(machine.undo_step());
+            assert_eq!(machine.get_register(R0), 2);
+            assert!(machine.undo_step());
+            assert_eq!(machine.get_register(R0), 1);
+            assert!(machine.undo_step());
+            assert_eq!(machine.get_register(R0), 0);
+            assert!(!machine.undo_step());
+        }
+
+        #[test]
+        fn undo_after_halt() {
+            use Register::*;
+            let mut machine = BrookshearMachine::new();
+            machine.set_history_limit(10);
+            machine.load_memory(brookshear_assembly::infallible_program_str_to_binary(
+                r#"
+MOV 1 -> R0
+HALT
+"#,
+            ));
+            assert_eq!(machine.get_register(R0), 0);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 1);
+            assert!(machine.undo_step());
+            assert_eq!(machine.get_register(R0), 0);
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -461,5 +533,56 @@ impl BrookshearMachine {
 impl Default for BrookshearMachine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BrookshearMachine, BrookshearMachineError, StructuredInstruction};
+
+    #[test]
+    fn machine_fetch_instruction_bounds() {
+        let mut machine = BrookshearMachine::new();
+        // Valid fetch at 0xFE (last valid instruction address)
+        machine.set_memory(0xFE, 0x0F);
+        machine.set_memory(0xFF, 0xFF);
+        let instr = machine
+            .fetch_instruction(0xFE)
+            .expect("should fetch at 0xFE");
+        assert_eq!(instr, StructuredInstruction::Nop);
+
+        // Fetch at 0xFF should return EndOfMemory (not panic)
+        let err = machine
+            .fetch_instruction(0xFF)
+            .expect_err("should error at 0xFF");
+        assert!(matches!(err, BrookshearMachineError::EndOfMemory));
+    }
+
+    #[test]
+    fn machine_step_at_fe_errors() {
+        let mut machine = BrookshearMachine::new();
+        // Place NOP at 0xFE
+        machine.set_memory(0xFE, 0x0F);
+        machine.set_memory(0xFF, 0xFF);
+        machine.set_pc(0xFE);
+
+        // Desired: executing instruction at 0xFE errors because PC would advance to 0x100 (out of bounds)
+        let err = machine.step().expect_err("should error at 0xFE");
+        assert!(
+            matches!(err, BrookshearMachineError::EndOfMemory),
+            "step at 0xFE should return EndOfMemory (PC would become 0x100)"
+        );
+    }
+
+    #[test]
+    fn machine_halt_does_not_advance_pc() {
+        let mut machine = BrookshearMachine::new();
+        machine.set_memory(0x10, 0xC0);
+        machine.set_memory(0x11, 0x00);
+        machine.set_pc(0x10);
+
+        let cont = machine.step().expect("step should succeed");
+        assert!(!cont);
+        assert_eq!(machine.get_pc(), 0x10, "PC should stay at HALT instruction");
     }
 }
