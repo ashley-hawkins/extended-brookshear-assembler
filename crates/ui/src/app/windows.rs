@@ -22,6 +22,10 @@ struct AboutWindow {
     open: bool,
 }
 
+const GITHUB_URL: &str = "https://github.com/ashley-hawkins/extended-brookshear-assembler";
+const GITHUB_COMMIT_URL: &str =
+    "https://github.com/ashley-hawkins/extended-brookshear-assembler/tree/";
+
 impl AboutWindow {
     fn show(&mut self, ctx: &egui::Context) {
         egui::Window::new("About")
@@ -34,23 +38,27 @@ impl AboutWindow {
                 ui.vertical(|ui| {
                     ui.heading("Brookshear Machine Emulator");
                     ui.label("Created by Ashley Hawkins");
-                    ui.label("UI layout and extended instructions are based on JBrookshearMachine by Milan Gritta");
+                    ui.label(concat!(
+                        "UI layout and extended instructions ",
+                        "are based on JBrookshearMachine by Milan Gritta",
+                    ));
                     ui.horizontal(|ui| {
                         ui.label("Source code available at:");
-                        ui.add(
-                            egui::Hyperlink::new(
-                                "https://github.com/ashley-hawkins/extended-brookshear-assembler",
-                            )
-                            .open_in_new_tab(true),
-                        );
+                        ui.add(egui::Hyperlink::new(GITHUB_URL).open_in_new_tab(true));
                     });
                     ui.horizontal(|ui| {
                         const DIRTY: bool = env!("GIT_DIRTY") == "true";
 
                         ui.label("Built from commit:");
-                        ui.add(egui::Hyperlink::from_label_and_url(
-                            format!("{}{}", env!("GIT_HASH"), if DIRTY { " (dirty)" } else { "" }),
-                            &format!("https://github.com/ashley-hawkins/extended-brookshear-assembler/tree/{}", env!("GIT_HASH")),)
+                        ui.add(
+                            egui::Hyperlink::from_label_and_url(
+                                format!(
+                                    "{}{}",
+                                    env!("GIT_HASH"),
+                                    if DIRTY { " (dirty)" } else { "" }
+                                ),
+                                format!("{}{}", GITHUB_COMMIT_URL, env!("GIT_HASH")),
+                            )
                             .open_in_new_tab(true),
                         );
                     });

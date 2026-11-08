@@ -1,5 +1,5 @@
-mod tables;
 mod table_renderer;
+mod tables;
 mod windows;
 
 #[cfg(not(target_arch = "wasm32"))]

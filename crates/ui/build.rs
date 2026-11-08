@@ -13,11 +13,17 @@ fn main() {
     let stripped = hash.strip_suffix("-dirty").unwrap_or(&hash);
     let dirty = hash.ends_with("-dirty");
 
-    let release = std::env::var("PROFILE").map(|p| p == "release").unwrap_or(false);
-    let release_dirty_override = std::env::var("ALLOW_DIRTY_RELEASE").map(|v| v == "true").unwrap_or(false);
+    let release = std::env::var("PROFILE")
+        .map(|p| p == "release")
+        .unwrap_or(false);
+    let release_dirty_override = std::env::var("ALLOW_DIRTY_RELEASE")
+        .map(|v| v == "true")
+        .unwrap_or(false);
 
     if dirty && release && !release_dirty_override {
-        panic!("Cannot build a release with a dirty git state. If you really want to do this, set the ALLOW_DIRTY_RELEASE environment variable to true.");
+        panic!(
+            "Cannot build a release with a dirty git state. If you really want to do this, set the ALLOW_DIRTY_RELEASE environment variable to true."
+        );
     }
 
     println!("cargo:rustc-env=GIT_HASH={stripped}");

@@ -1,6 +1,6 @@
-use std::hash::Hash;
 use egui::ScrollArea;
 use egui_extras::Column;
+use std::hash::Hash;
 
 use crate::app::{MaybeRichError, MessageState};
 

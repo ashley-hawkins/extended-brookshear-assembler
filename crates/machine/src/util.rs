@@ -111,13 +111,7 @@ mod tests {
 
     #[test]
     fn float8_unrepresentable_finite_values() {
-        let unrepresentable_values = [
-            8.0,
-            4.25,
-            2.125,
-            1.0625,
-            0.001953125
-        ];
+        let unrepresentable_values = [8.0, 4.25, 2.125, 1.0625, 0.001953125];
 
         for &val in &unrepresentable_values {
             if let Ok(val) = try_f32_to_float8(val) {

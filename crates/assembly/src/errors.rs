@@ -55,13 +55,21 @@ pub fn write_parse_errors<'src>(
             } => match (expected, (**found).clone()) {
                 (_, AsmToken::Ambiguous(ambig)) => {
                     if C_STYLE_HEX_RE.is_match(ambig) {
-                        Some(format!("This token, \'{}\', looks like a C-style hexadecimal number. Hexadecimal numbers are written with no prefix, or optionally with the suffix _h, e.g. {}_h", ambig, &ambig[2..]))
+                        Some(format!(
+                            "This token, \'{}\', looks like a C-style hexadecimal number. Hexadecimal numbers are written with no prefix, or optionally with the suffix _h, e.g. {}_h",
+                            ambig,
+                            &ambig[2..]
+                        ))
                     } else if ambig.chars().all(|c| c.is_ascii_digit()) {
-                        Some(format!("This token, \'{}\', entirely consists of digits, but it is not a valid number because it is not clear which base it is intended to be.\nSuffix it with _d for decimal, _h for hexadecimal, or _b for binary.", ambig))
+                        Some(format!(
+                            "This token, \'{}\', entirely consists of digits, but it is not a valid number because it is not clear which base it is intended to be.\nSuffix it with _d for decimal, _h for hexadecimal, or _b for binary.",
+                            ambig
+                        ))
                     } else {
-                        Some(
-                            format!("This token, \'{}\', is ambiguous due to the fact that it contains characters that could be used\nin either a number or an identifier (such as a label), but it could not be determined which was\nintended. Usually this happens as a result of writing an identifier that starts with a digit\nsuch as \"0hello\" which is unfortunately not supported.", ambig),
-                        )
+                        Some(format!(
+                            "This token, \'{}\', is ambiguous due to the fact that it contains characters that could be used\nin either a number or an identifier (such as a label), but it could not be determined which was\nintended. Usually this happens as a result of writing an identifier that starts with a digit\nsuch as \"0hello\" which is unfortunately not supported.",
+                            ambig
+                        ))
                     }
                 }
                 _ => None,
@@ -109,7 +117,9 @@ pub fn write_semantic_error(
             .with_color(Color::Red),
     );
 
-    let report = if let SerializationErrorMessage::UnlabeledConstant(Some(offset_span)) = &error.message {
+    let report = if let SerializationErrorMessage::UnlabeledConstant(Some(offset_span)) =
+        &error.message
+    {
         report.with_label(
             Label::new((file_name.clone(), offset_span.into_range()))
                 .with_message("This is not a valid symbolic name, as it is purely numeric and therefore has been interpreted as an offset.")
@@ -121,13 +131,22 @@ pub fn write_semantic_error(
 
     let report = if let Some(help) = match &error.message {
         SerializationErrorMessage::UndefinedConstant(constant_name, valid_constants) => {
-            let mut considered_similarities = valid_constants.iter().filter_map(|valid_constant| {
-                let sim = rapidfuzz::distance::levenshtein::normalized_similarity(constant_name.to_lowercase().chars(), valid_constant.to_lowercase().chars());
-                (sim > 0.55).then_some((valid_constant, sim))
-            }).collect::<Vec<_>>();
+            let mut considered_similarities = valid_constants
+                .iter()
+                .filter_map(|valid_constant| {
+                    let sim = rapidfuzz::distance::levenshtein::normalized_similarity(
+                        constant_name.to_lowercase().chars(),
+                        valid_constant.to_lowercase().chars(),
+                    );
+                    (sim > 0.55).then_some((valid_constant, sim))
+                })
+                .collect::<Vec<_>>();
             considered_similarities.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
 
-            if considered_similarities.first().is_some_and(|(_, sim)| *sim == 1.0) {
+            if considered_similarities
+                .first()
+                .is_some_and(|(_, sim)| *sim == 1.0)
+            {
                 Some(format!(
                     "The symbolic name '{}' is not defined, but there is a symbolic name with the exact same spelling except for case.\nSymbolic names are case-sensitive, so be sure to match the exact case of the symbolic name you want to refer to.",
                     constant_name,
@@ -139,23 +158,39 @@ pub fn write_semantic_error(
                     considered_similarities.iter().map(|(s, score)| format!("  - '{}' (similarity: {:.0}%)", s, score * 100.0)).collect::<Vec<_>>().join("\n")
                 ))
             }
-        },
+        }
         SerializationErrorMessage::UnlabeledConstant(Some(explicit_addr_span)) => {
             let span_text = &src[explicit_addr_span.into_range()];
-            if span_text.chars().any(|c| !c.is_ascii_digit())  {
+            if span_text.chars().any(|c| !c.is_ascii_digit()) {
                 Some("This CONST pseudo-instruction does not have an associated symbolic name. It seems you tried to set a symbolic name and it was instead interpreted as an offset.\nIn order to resolve this, you must disambiguate by using a symbolic name longer than 2 characters, or which contains at least one non-hexadecimal character.".to_string())
             } else {
                 Some("This CONST pseudo-instruction does not have an associated symbolic name, but it seems you tried to set a symbolic name and it was instead interpreted as an offset.\nSymbolic names must begin with a non-digit and be longer than 2 characters.".to_string())
             }
-        },
+        }
         SerializationErrorMessage::UnknownMnemonic(mnem) => {
-            let valid_mnemonics = ["MOV", "HALT", "NOP", "ADDI", "ADDF", "AND", "OR", "XOR", "ROT", "JMP", "JMPEQ", "JMPNE", "JMPGE", "JMPLE", "JMPGT", "JMPLT", "DATA"];
-            let mut considered_similarities = valid_mnemonics.iter().filter_map(|&valid_mnem| {
-                let sim = rapidfuzz::distance::levenshtein::normalized_similarity(mnem.to_uppercase().chars(), valid_mnem.chars());
-                (sim > 0.55).then_some((valid_mnem, sim))
-            }).collect::<Vec<_>>();
+            let valid_mnemonics = [
+                "MOV", "HALT", "NOP", "ADDI", "ADDF", "AND", "OR", "XOR", "ROT", "JMP", "JMPEQ",
+                "JMPNE", "JMPGE", "JMPLE", "JMPGT", "JMPLT", "DATA",
+            ];
+            let mut considered_similarities = valid_mnemonics
+                .iter()
+                .filter_map(|&valid_mnem| {
+                    let sim = rapidfuzz::distance::levenshtein::normalized_similarity(
+                        mnem.to_uppercase().chars(),
+                        valid_mnem.chars(),
+                    );
+                    (sim > 0.55).then_some((valid_mnem, sim))
+                })
+                .collect::<Vec<_>>();
             considered_similarities.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
-            (!considered_similarities.is_empty()).then_some(format!("Did you mean one of these mnemonics? (Ranked by similarity):\n{}", considered_similarities.iter().map(|(s, score)| format!("  - '{}' (similarity: {:.0}%)", s, score * 100.0)).collect::<Vec<_>>().join("\n")))
+            (!considered_similarities.is_empty()).then_some(format!(
+                "Did you mean one of these mnemonics? (Ranked by similarity):\n{}",
+                considered_similarities
+                    .iter()
+                    .map(|(s, score)| format!("  - '{}' (similarity: {:.0}%)", s, score * 100.0))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ))
         }
         _ => None,
     } {
