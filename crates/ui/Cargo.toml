@@ -28,7 +28,7 @@ serde.workspace = true
 rfd = { version = "0.18.0", default-features = false, features = ["xdg-portal"] }
 futures = { version = "0.3.32", default-features = false, features = ["alloc"] }
 anstyle-parse = { version = "1.0.0", default-features = false, features = ["utf8"] }
-egui_commonmark = { version = "0.26.0", features = ["macros"] }
+egui_commonmark = { version = "0.26.0", default-features = false, features = ["macros", "pulldown_cmark"] }
 image = { version = "0.25.10", default-features = false }
 
 # native:

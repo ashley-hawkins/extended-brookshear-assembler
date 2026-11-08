@@ -1,8 +1,7 @@
-use std::{borrow::Borrow, sync::LazyLock};
+use std::borrow::Borrow;
 
 use ariadne::{Color, Label, Report, ReportKind, sources};
 use chumsky::error::RichReason;
-use regex::Regex;
 
 use crate::{
     lexer::{AsmToken, LexErr},
@@ -15,8 +14,13 @@ pub fn write_parse_errors<'src>(
     errors: &[impl Borrow<crate::parser::Error<'src>>],
     w: &mut impl std::io::Write,
 ) {
-    static C_STYLE_HEX_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^0[xX][0-9a-fA-F]+$").unwrap());
+    fn is_c_style_hex(s: &str) -> bool {
+        s.strip_prefix("0x")
+            .or_else(|| s.strip_prefix("0X"))
+            .is_some_and(|digits| {
+                !digits.is_empty() && digits.chars().all(|c| c.is_ascii_hexdigit())
+            })
+    }
 
     for error in errors {
         let error = error.borrow();
@@ -54,7 +58,7 @@ pub fn write_parse_errors<'src>(
                 found: Some(found),
             } => match (expected, (**found).clone()) {
                 (_, AsmToken::Ambiguous(ambig)) => {
-                    if C_STYLE_HEX_RE.is_match(ambig) {
+                    if is_c_style_hex(ambig) {
                         Some(format!(
                             "This token, \'{}\', looks like a C-style hexadecimal number. Hexadecimal numbers are written with no prefix, or optionally with the suffix _h, e.g. {}_h",
                             ambig,

@@ -10,6 +10,5 @@ ariadne = { git = "https://codeberg.org/ashley-hawkins/ariadne.git", default-fea
 chumsky = { version = "0.13.0", default-features = false, features = ["pratt"] }
 logos = { version = "0.16.1", default-features = false, features = ["export_derive"] }
 rapidfuzz = { version = "0.5.0", default-features = false }
-regex.workspace = true
 strum.workspace = true
 thiserror.workspace = true

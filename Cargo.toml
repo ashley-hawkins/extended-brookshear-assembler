@@ -6,7 +6,6 @@ resolver = "3"
 
 [workspace.dependencies]
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
-regex = { version = "1.13.1", default-features = false }
 strum = { version = "0.28.0", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.21", default-features = false }
 
