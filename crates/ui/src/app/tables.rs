@@ -79,39 +79,71 @@ impl EditableTableState {
     }
 }
 
-trait TableColumn<Row, Context>: Copy {
+trait TableColumn<D>: Copy
+where
+    D: TableData,
+{
+    type Context;
+
     fn header(self) -> &'static str;
 
     fn column(self) -> Column;
 
-    fn display(self, row_index: usize, rows: &[Row], context: &Context) -> String;
+    fn display(self, row_index: usize, data: &D, context: &Self::Context) -> String;
 
-    fn is_editable(self, _row_index: usize, _rows: &[Row], _context: &Context) -> bool {
+    fn is_editable(self, _row_index: usize, _data: &D, _context: &Self::Context) -> bool {
         false
     }
 
-    fn edit_row_advance(self, _row_index: usize, _rows: &[Row], _context: &Context) -> usize {
+    fn edit_row_advance(self, _row_index: usize, _data: &D, _context: &Self::Context) -> usize {
         1
     }
 
     fn try_set(
         self,
         _row_index: usize,
-        _rows: &mut [Row],
+        _data: &mut D,
         _value: &str,
-        _context: &Context,
+        _context: &Self::Context,
     ) -> Result<(), MaybeRichError> {
         Err(MaybeRichError::from("This cell is not editable."))
     }
 }
 
-struct SelectableTable<'a, Row, Col, Context> {
+pub trait TableData {
+    type Row;
+
+    fn len(&self) -> usize;
+    fn get_row(&self, index: usize) -> &Self::Row;
+    fn modify_row(&mut self, index: usize, f: impl FnOnce(&mut Self::Row));
+}
+
+impl<T, const N: usize> TableData for [T; N] {
+    type Row = T;
+
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    fn get_row(&self, index: usize) -> &Self::Row {
+        &self[index]
+    }
+    fn modify_row(&mut self, index: usize, f: impl FnOnce(&mut Self::Row)) {
+        f(&mut self[index]);
+    }
+}
+
+struct SelectableTable<'a, D, Col>
+where
+    D: TableData,
+    Col: TableColumn<D>,
+{
     id: egui::Id,
     columns: &'a [Col],
-    rows: &'a mut [Row],
+    data: &'a mut D,
     state: &'a mut EditableTableState,
     message_state: &'a mut MessageState,
-    context: &'a Context,
+    context: &'a Col::Context,
     row_height: f32,
     min_scrolled_height: f32,
     scroll_to_row: Option<usize>,
@@ -125,22 +157,23 @@ struct CellLocation {
     column_count: usize,
 }
 
-impl<'a, Row, Col, Context> SelectableTable<'a, Row, Col, Context>
+impl<'a, D, Col> SelectableTable<'a, D, Col>
 where
-    Col: TableColumn<Row, Context>,
+    D: TableData,
+    Col: TableColumn<D>,
 {
     fn new(
         id_salt: impl Hash,
         columns: &'a [Col],
-        rows: &'a mut [Row],
+        data: &'a mut D,
         state: &'a mut EditableTableState,
         message_state: &'a mut MessageState,
-        context: &'a Context,
+        context: &'a Col::Context,
     ) -> Self {
         Self {
             id: egui::Id::new(id_salt),
             columns,
-            rows,
+            data,
             state,
             message_state,
             context,
@@ -166,7 +199,7 @@ where
     }
 
     fn show(self, ui: &mut egui::Ui) {
-        let row_count = self.rows.len();
+        let row_count = self.data.len();
 
         if self.state.should_defer_cell_focus {
             self.state.should_defer_cell_focus = false;
@@ -204,7 +237,7 @@ where
             table.ui_mut().style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
 
             table.body(|body| {
-                body.rows(self.row_height, self.rows.len(), |mut row_ui| {
+                body.rows(self.row_height, row_count, |mut row_ui| {
                     let row_index = row_ui.index();
                     if Some(row_index) == self.state.highlight.row() {
                         row_ui.set_selected(true);
@@ -221,7 +254,7 @@ where
                                 row_count,
                                 column_count: self.columns.len(),
                             },
-                            self.rows,
+                            self.data,
                             column,
                             self.context,
                         );
@@ -232,21 +265,22 @@ where
     }
 }
 
-fn render_table_cell<Row, Col, Context>(
+fn render_table_cell<D, Col>(
     row_ui: &mut egui_extras::TableRow<'_, '_>,
     state: &mut EditableTableState,
     message_state: &mut MessageState,
     cell: CellLocation,
-    rows: &mut [Row],
+    data: &mut D,
     column: Col,
-    context: &Context,
+    context: &Col::Context,
 ) where
-    Col: TableColumn<Row, Context>,
+    D: TableData,
+    Col: TableColumn<D>,
 {
     row_ui.col(|ui| {
         let cell_coords = (cell.row, cell.column);
         let is_highlighted_cell = state.highlight.cell() == Some(cell_coords);
-        let is_editable = column.is_editable(cell.row, rows, context);
+        let is_editable = column.is_editable(cell.row, data, context);
 
         if is_editable
             && let Some((cell_being_edited, edit_str)) = &mut state.editing_cell
@@ -262,8 +296,8 @@ fn render_table_cell<Row, Col, Context>(
                 let pressed_escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
 
                 if pressed_enter {
-                    let row_advance = column.edit_row_advance(cell.row, rows, context);
-                    match column.try_set(cell.row, rows, edit_str, context) {
+                    let row_advance = column.edit_row_advance(cell.row, data, context);
+                    match column.try_set(cell.row, data, edit_str, context) {
                         Ok(()) => {
                             message_state.set_message(String::new());
                             state.set_highlighted_cell(
@@ -292,7 +326,7 @@ fn render_table_cell<Row, Col, Context>(
         }
 
         ui.centered_and_justified(|ui| {
-            let value = column.display(cell.row, rows, context);
+            let value = column.display(cell.row, data, context);
             let response = egui::Frame::new()
                 .fill(if is_highlighted_cell {
                     ui.visuals().selection.bg_fill
@@ -389,7 +423,9 @@ const REGISTER_COLUMNS: [RegisterColumn; 7] = [
     RegisterColumn::Ascii,
 ];
 
-impl TableColumn<u8, ()> for RegisterColumn {
+impl<D: TableData<Row = u8>> TableColumn<D> for RegisterColumn {
+    type Context = ();
+
     fn header(self) -> &'static str {
         match self {
             Self::Register => "Register",
@@ -420,8 +456,8 @@ impl TableColumn<u8, ()> for RegisterColumn {
         }
     }
 
-    fn display(self, row_index: usize, rows: &[u8], _context: &()) -> String {
-        let row = rows[row_index];
+    fn display(self, row_index: usize, data: &D, _context: &Self::Context) -> String {
+        let row = *data.get_row(row_index);
         match self {
             Self::Register => format!("{:X}", row_index),
             Self::Binary => format!("{:08b}", row),
@@ -433,16 +469,16 @@ impl TableColumn<u8, ()> for RegisterColumn {
         }
     }
 
-    fn is_editable(self, _row_index: usize, _rows: &[u8], _context: &()) -> bool {
+    fn is_editable(self, _row_index: usize, _data: &D, _context: &Self::Context) -> bool {
         !matches!(self, Self::Register)
     }
 
     fn try_set(
         self,
         row_index: usize,
-        rows: &mut [u8],
+        data: &mut D,
         value: &str,
-        _context: &(),
+        _context: &Self::Context,
     ) -> Result<(), MaybeRichError> {
         let parsed = match self {
             Self::Register => Err(MaybeRichError::from("Register labels cannot be edited.")),
@@ -452,9 +488,10 @@ impl TableColumn<u8, ()> for RegisterColumn {
             Self::SignedDecimal => parse_signed_decimal_byte(value),
             Self::Float => parse_float8_byte(value),
             Self::Ascii => parse_ascii_byte(value),
-        };
+        }?;
 
-        rows[row_index] = parsed?;
+        data.modify_row(row_index, |row| *row = parsed);
+
         Ok(())
     }
 }
@@ -486,7 +523,9 @@ struct MemoryTableContext {
     descriptive_disassembly: bool,
 }
 
-impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
+impl<D: TableData<Row = u8>> TableColumn<D> for MemoryColumn {
+    type Context = MemoryTableContext;
+
     fn header(self) -> &'static str {
         match self {
             Self::Address => "Address",
@@ -518,21 +557,21 @@ impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
         }
     }
 
-    fn display(self, row_index: usize, rows: &[u8], context: &MemoryTableContext) -> String {
-        let row = rows[row_index];
+    fn display(self, row_index: usize, data: &D, context: &Self::Context) -> String {
+        let row = data.get_row(row_index);
         match self {
             Self::Address => format!("{:02X}", row_index),
             Self::Binary => format!("{:08b}", row),
             Self::Hex => format!("{:02X}", row),
             Self::UnsignedDecimal => format!("{}", row),
-            Self::SignedDecimal => format!("{}", row as i8),
-            Self::Float => float8_to_string(row),
-            Self::Ascii => byte_to_ascii(row),
-            Self::Instruction => display_instruction(row_index, rows, context),
+            Self::SignedDecimal => format!("{}", *row as i8),
+            Self::Float => float8_to_string(*row),
+            Self::Ascii => byte_to_ascii(*row),
+            Self::Instruction => display_instruction(row_index, data, context),
         }
     }
 
-    fn is_editable(self, row_index: usize, rows: &[u8], context: &MemoryTableContext) -> bool {
+    fn is_editable(self, row_index: usize, data: &D, context: &Self::Context) -> bool {
         matches!(
             self,
             Self::Binary
@@ -544,16 +583,11 @@ impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
         ) || matches!(self, Self::Instruction)
             && !context.descriptive_disassembly
             && row_index.is_multiple_of(2)
-            && row_index + 1 < rows.len()
+            && row_index + 1 < data.len()
     }
 
-    fn edit_row_advance(
-        self,
-        row_index: usize,
-        rows: &[u8],
-        context: &MemoryTableContext,
-    ) -> usize {
-        if matches!(self, Self::Instruction) && self.is_editable(row_index, rows, context) {
+    fn edit_row_advance(self, row_index: usize, data: &D, context: &Self::Context) -> usize {
+        if matches!(self, Self::Instruction) && self.is_editable(row_index, data, context) {
             2
         } else {
             1
@@ -563,9 +597,9 @@ impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
     fn try_set(
         self,
         row_index: usize,
-        rows: &mut [u8],
+        data: &mut D,
         value: &str,
-        _context: &MemoryTableContext,
+        context: &Self::Context,
     ) -> Result<(), MaybeRichError> {
         let parsed = match self {
             Self::Address => Err(MaybeRichError::from("This column cannot be edited.")),
@@ -576,14 +610,16 @@ impl TableColumn<u8, MemoryTableContext> for MemoryColumn {
             Self::Float => parse_float8_byte(value),
             Self::Ascii => parse_ascii_byte(value),
             Self::Instruction => {
+                // Write done separately here as this is a special case  that spans multiple rows.
                 let [first_byte, second_byte] = parse_instruction_bytes(value)?;
-                rows[row_index] = first_byte;
-                rows[row_index + 1] = second_byte;
+                data.modify_row(row_index, |row| *row = first_byte);
+                data.modify_row(row_index + 1, |row| *row = second_byte);
                 return Ok(());
             }
-        };
+        }?;
 
-        rows[row_index] = parsed?;
+        data.modify_row(row_index, |row| *row = parsed);
+
         Ok(())
     }
 }
@@ -689,12 +725,16 @@ fn byte_to_ascii(byte: u8) -> String {
     }
 }
 
-fn display_instruction(row_index: usize, rows: &[u8], context: &MemoryTableContext) -> String {
-    if !row_index.is_multiple_of(2) || row_index + 1 >= rows.len() {
+fn display_instruction<D: TableData<Row = u8>>(
+    row_index: usize,
+    data: &D,
+    context: &MemoryTableContext,
+) -> String {
+    if !row_index.is_multiple_of(2) || row_index + 1 >= data.len() {
         return String::new();
     }
 
-    StructuredInstruction::from_bytes([rows[row_index], rows[row_index + 1]])
+    StructuredInstruction::from_bytes([*data.get_row(row_index), *data.get_row(row_index + 1)])
         .map(|instruction| {
             if context.descriptive_disassembly {
                 instruction.describe()
