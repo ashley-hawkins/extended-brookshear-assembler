@@ -173,7 +173,9 @@ impl InfoPanel {
                         .on_hover_text("Reset registers and start running")
                         .clicked()
                     {
-                        app.emulator_state.reset_registers();
+                        app.emulator_state.tamper(|mut tamper| {
+                            tamper.reset_registers();
+                        });
                         app.emulator_instructions_executed = 0;
                         app.update_pc_text_buffer();
                         app.cont();
@@ -490,7 +492,9 @@ impl App {
                             .on_hover_text("Reset all memory cells to 0")
                             .clicked()
                         {
-                            self.emulator_state.reset_memory();
+                            self.emulator_state.tamper(|mut tamper| {
+                                tamper.reset_memory();
+                            });
                         }
                     });
                     strip.strip(|builder| {
@@ -781,7 +785,9 @@ impl App {
                                             16,
                                         )
                                     {
-                                        self.emulator_state.set_pc(val);
+                                        self.emulator_state.tamper(|mut tamper| {
+                                            tamper.set_pc(val);
+                                        });
                                         self.set_highlighted_row(val);
                                     }
                                 });
@@ -796,7 +802,9 @@ impl App {
                                     .on_hover_text("Reset all registers to 0")
                                     .clicked()
                                 {
-                                    self.emulator_state.reset_registers();
+                                    self.emulator_state.tamper(|mut tamper| {
+                                        tamper.reset_registers();
+                                    });
                                     self.emulator_instructions_executed = 0;
                                     self.update_pc_text_buffer();
                                     self.set_highlighted_row(self.emulator_state.get_pc());
@@ -827,10 +835,14 @@ impl App {
                                     );
 
                                 if response.clicked() {
-                                    self.emulator_state.get_all_memory_mut()[0x80..0x100].fill(0);
+                                    self.emulator_state.tamper(|mut tamper| {
+                                        tamper.get_all_memory_mut()[0x80..0x100].fill(0);
+                                    });
                                 } else if response.secondary_clicked() {
-                                    self.emulator_state.get_all_memory_mut()[0x80..0x100]
-                                        .fill(0xFF);
+                                    self.emulator_state.tamper(|mut tamper| {
+                                        tamper.get_all_memory_mut()[0x80..0x100]
+                                            .fill(0xFF);
+                                    });
                                 }
                             });
                         });
@@ -866,13 +878,13 @@ impl App {
                         },
                     );
                     if sense.clicked() {
-                        if pixel_on {
-                            self.emulator_state
-                                .set_memory(address, byte & !(1 << (7 - (col % 8))));
-                        } else {
-                            self.emulator_state
-                                .set_memory(address, byte | (1 << (7 - (col % 8))));
-                        }
+                        self.emulator_state.tamper(|mut tamper| {
+                            if pixel_on {
+                                tamper.set_memory(address, byte & !(1 << (7 - (col % 8))));
+                            } else {
+                                tamper.set_memory(address, byte | (1 << (7 - (col % 8))));
+                            }
+                        });
                     }
                 }
             }
@@ -970,8 +982,10 @@ impl App {
                 match image_result {
                     Some(Ok(display)) => {
                         self.ui_state.pending_display_image = None;
-                        self.emulator_state.get_all_memory_mut()[0x80..0x100]
-                            .copy_from_slice(&display);
+                        self.emulator_state.tamper(|mut tamper| {
+                            tamper.get_all_memory_mut()[0x80..0x100]
+                                .copy_from_slice(&display);
+                        });
                         self.set_message("Successfully loaded display image.");
                     }
                     Some(Err(err)) => {

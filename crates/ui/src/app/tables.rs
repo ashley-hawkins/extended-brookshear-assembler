@@ -1,4 +1,5 @@
 use brookshear_assembly::{
+    common::Register,
     errors::{parse_errors_to_string, semantic_errors_to_string},
     parser::parse_asm_file,
     serialize::serialize_inline_instruction_to_binary,
@@ -8,7 +9,56 @@ use brookshear_machine::{float8_to_string, string_to_float8};
 use egui::{Align, Frame, Layout};
 use egui_extras::Column;
 
-use crate::{App, app::{MaybeRichError, table_renderer::{SelectableTable, TableColumn, TableData}}};
+use crate::{
+    App,
+    app::{
+        MaybeRichError,
+        table_renderer::{SelectableTable, TableColumn, TableData},
+    },
+};
+
+struct RegisterTableData<'a> {
+    emulator: &'a mut brookshear_machine::BrookshearMachine,
+}
+
+impl TableData for RegisterTableData<'_> {
+    type Row = u8;
+
+    fn len(&self) -> usize {
+        self.emulator.get_all_registers().len()
+    }
+
+    fn get_row(&self, index: usize) -> &Self::Row {
+        &self.emulator.get_all_registers()[index]
+    }
+
+    fn modify_row(&mut self, index: usize, f: impl FnOnce(&mut Self::Row)) {
+        self.emulator
+            .tamper(|mut t| f(t.get_register_mut(Register::from_repr(index as u8).unwrap())));
+    }
+}
+
+struct MemoryTableData<'a> {
+    emulator: &'a mut brookshear_machine::BrookshearMachine,
+}
+
+impl TableData for MemoryTableData<'_> {
+    type Row = u8;
+
+    fn len(&self) -> usize {
+        self.emulator.get_all_memory().len()
+    }
+
+    fn get_row(&self, index: usize) -> &Self::Row {
+        &self.emulator.get_all_memory()[index]
+    }
+
+    fn modify_row(&mut self, index: usize, f: impl FnOnce(&mut Self::Row)) {
+        self.emulator.tamper(|mut t| {
+            f(t.get_memory_mut(u8::try_from(index).expect("Invalid memory index")))
+        });
+    }
+}
 
 #[derive(Clone, Copy)]
 enum RegisterColumn {
@@ -238,7 +288,9 @@ impl App {
             SelectableTable::new(
                 "register_table",
                 &REGISTER_COLUMNS,
-                self.emulator_state.get_all_registers_mut(),
+                &mut RegisterTableData {
+                    emulator: &mut self.emulator_state,
+                },
                 &mut self.ui_state.register_table_state,
                 &mut self.ui_state.message,
                 &(),
@@ -273,7 +325,9 @@ impl App {
                         SelectableTable::new(
                             "memory_table",
                             &MEMORY_COLUMNS,
-                            self.emulator_state.get_all_memory_mut(),
+                            &mut MemoryTableData {
+                                emulator: &mut self.emulator_state,
+                            },
                             &mut self.ui_state.memory_table_state,
                             &mut self.ui_state.message,
                             &context,

@@ -1,5 +1,7 @@
 pub mod util;
 
+use std::ops::Deref;
+
 use brookshear_assembly::{
     common::Register,
     structured_instruction::{CmpjmpOperator, StructuredInstruction},
@@ -293,6 +295,38 @@ HALT
             assert!(machine.undo_step());
             assert_eq!(machine.get_register(R0), 0);
         }
+
+        #[test]
+        fn undo_invalidated_on_tamper() {
+            use Register::*;
+            let mut machine = BrookshearMachine::new();
+            machine.set_history_limit(10);
+            machine.load_memory(brookshear_assembly::infallible_program_str_to_binary(
+                r#"
+MOV 1 -> R0
+MOV 2 -> R0
+MOV CC -> R1
+MOV R0 -> [R1]
+HALT
+somedata: DATA CC
+"#,
+            ));
+            assert_eq!(machine.get_register(R0), 0);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 1);
+            assert!(machine.step().unwrap());
+            assert_eq!(machine.get_register(R0), 2);
+            assert_eq!(machine.get_memory(0xA), 0xCC);
+
+            machine.tamper(|mut t| t.set_register(R0, 0xAA));
+            machine.tamper(|mut t| t.set_memory(0xA, 0xBB));
+
+            // Undo should not restore 2
+            let undid = machine.undo_step();
+            assert!(!undid);
+            assert_eq!(machine.get_register(R0), 0xAA);
+            assert_eq!(machine.get_memory(0xA), 0xBB);
+        }
     }
 }
 
@@ -305,6 +339,53 @@ pub struct BrookshearMachine {
     #[cfg(feature = "undo")]
     #[serde(skip)]
     undo_history: undo::UndoHistory,
+}
+
+pub struct BrookshearMachineTamper<'a>(&'a mut BrookshearMachine);
+impl Deref for BrookshearMachineTamper<'_> {
+    type Target = BrookshearMachine;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+impl BrookshearMachineTamper<'_> {
+    pub fn reset_memory(&mut self) {
+        self.0.reset_memory()
+    }
+    pub fn reset_registers(&mut self) {
+        self.0.reset_registers()
+    }
+    pub fn set_pc(&mut self, value: u8) {
+        self.0.set_pc(value);
+    }
+    pub fn set_memory(&mut self, address: u8, value: u8) {
+        self.0.set_memory(address, value);
+    }
+    pub fn get_memory_mut(&mut self, address: u8) -> &mut u8 {
+        self.0.get_memory_mut(address)
+    }
+    pub fn load_memory(&mut self, image: [u8; 256]) {
+        self.0.load_memory(image);
+    }
+    pub fn get_all_memory_mut(&mut self) -> &mut [u8; 256] {
+        self.0.get_all_memory_mut()
+    }
+    pub fn get_all_registers_mut(&mut self) -> &mut [u8; 16] {
+        self.0.get_all_registers_mut()
+    }
+    pub fn set_register(&mut self, register: Register, value: u8) {
+        self.0.set_register(register, value);
+    }
+    pub fn get_register_mut(&mut self, register: Register) -> &mut u8 {
+        self.0.get_register_mut(register)
+    }
+    pub fn execute_instruction(
+        &mut self,
+        instruction: StructuredInstruction,
+    ) -> Result<ControlFlow, BrookshearMachineError> {
+        self.0.execute_instruction(instruction)
+    }
 }
 
 impl BrookshearMachine {
@@ -321,25 +402,35 @@ impl BrookshearMachine {
         }
     }
 
-    pub fn load_memory(&mut self, image: [u8; 256]) {
-        self.memory = image;
-    }
-
-    pub fn reset(&mut self) {
-        self.reset_memory();
-        self.reset_registers();
-    }
-
-    pub fn reset_memory(&mut self) {
+    fn do_tamper(&mut self) {
         #[cfg(feature = "undo")]
         {
             // The undo history is no longer valid after a reset.
             self.undo_history.clear();
         }
+    }
+
+    pub fn tamper(&mut self, f: impl FnOnce(BrookshearMachineTamper)) {
+        f(BrookshearMachineTamper(self));
+        self.do_tamper();
+    }
+
+    pub fn load_memory(&mut self, image: [u8; 256]) {
+        self.memory = image;
+        self.do_tamper();
+    }
+
+    pub fn reset(&mut self) {
+        self.reset_memory();
+        self.reset_registers();
+        self.do_tamper();
+    }
+
+    fn reset_memory(&mut self) {
         self.memory = [0; 256];
     }
 
-    pub fn reset_registers(&mut self) {
+    fn reset_registers(&mut self) {
         #[cfg(feature = "undo")]
         {
             // The undo history is no longer valid after a reset.
@@ -349,7 +440,7 @@ impl BrookshearMachine {
         self.registers = [0; 16];
     }
 
-    pub fn set_pc(&mut self, value: u8) {
+    fn set_pc(&mut self, value: u8) {
         self.pc = value;
     }
 
@@ -357,7 +448,7 @@ impl BrookshearMachine {
         self.pc
     }
 
-    pub fn set_memory(&mut self, address: u8, value: u8) {
+    fn set_memory(&mut self, address: u8, value: u8) {
         self.memory[address as usize] = value;
     }
 
@@ -365,7 +456,7 @@ impl BrookshearMachine {
         self.memory[address as usize]
     }
 
-    pub fn get_memory_mut(&mut self, address: u8) -> &mut u8 {
+    fn get_memory_mut(&mut self, address: u8) -> &mut u8 {
         &mut self.memory[address as usize]
     }
 
@@ -373,7 +464,11 @@ impl BrookshearMachine {
         &self.memory
     }
 
-    pub fn get_all_memory_mut(&mut self) -> &mut [u8; 256] {
+    pub fn get_all_registers(&self) -> &[u8; 16] {
+        &self.registers
+    }
+
+    fn get_all_memory_mut(&mut self) -> &mut [u8; 256] {
         &mut self.memory
     }
 
@@ -381,11 +476,15 @@ impl BrookshearMachine {
         self.registers[reg.as_index() as usize]
     }
 
-    pub fn get_all_registers_mut(&mut self) -> &mut [u8; 16] {
+    fn set_register(&mut self, reg: Register, value: u8) {
+        self.registers[reg.as_index() as usize] = value;
+    }
+
+    fn get_all_registers_mut(&mut self) -> &mut [u8; 16] {
         &mut self.registers
     }
 
-    pub fn get_register_mut(&mut self, reg: Register) -> &mut u8 {
+    fn get_register_mut(&mut self, reg: Register) -> &mut u8 {
         &mut self.registers[reg.as_index() as usize]
     }
 
@@ -411,7 +510,7 @@ impl BrookshearMachine {
         self.fetch_instruction(self.pc)
     }
 
-    pub fn execute_instruction(
+    fn execute_instruction(
         &mut self,
         instruction: StructuredInstruction,
     ) -> Result<ControlFlow, BrookshearMachineError> {
