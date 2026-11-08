@@ -44,6 +44,16 @@ impl AboutWindow {
                             .open_in_new_tab(true),
                         );
                     });
+                    ui.horizontal(|ui| {
+                        const DIRTY: bool = env!("GIT_DIRTY") == "true";
+
+                        ui.label("Built from commit:");
+                        ui.add(egui::Hyperlink::from_label_and_url(
+                            format!("{}{}", env!("GIT_HASH"), if DIRTY { " (dirty)" } else { "" }),
+                            &format!("https://github.com/ashley-hawkins/extended-brookshear-assembler/tree/{}", env!("GIT_HASH")),)
+                            .open_in_new_tab(true),
+                        );
+                    });
                     powered_by_egui_and_eframe(ui);
                 });
             });
