@@ -1,4 +1,5 @@
 mod tables;
+mod table_renderer;
 mod windows;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -17,7 +18,7 @@ use egui_extras::{Size, StripBuilder};
 use crate::{
     ansi::MyRichText,
     app::{
-        tables::EditableTableState,
+        table_renderer::EditableTableState,
         windows::{AppWindows, HelpPage, WindowOpenId},
     },
     helpers::{self, DisplayImageReceiver, FileReceiver, open_file},
