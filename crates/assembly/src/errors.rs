@@ -20,7 +20,7 @@ pub fn write_parse_errors<'src>(
 
     for error in errors {
         let error = error.borrow();
-        Report::build(
+        let report = Report::build(
             ReportKind::Error,
             (file_name.clone(), error.span().into_range()),
         )
@@ -43,11 +43,12 @@ pub fn write_parse_errors<'src>(
             RichReason::Custom(s) => s.clone(),
         })
         .with_label(
-                Label::new((file_name.clone(), error.span().into_range()))
-                    .with_message("Error occurred here.")
-                    .with_color(Color::Red),
-        )
-        .with_helps(match error.reason() {
+            Label::new((file_name.clone(), error.span().into_range()))
+                .with_message("Error occurred here.")
+                .with_color(Color::Red),
+        );
+
+        let report = if let Some(help) = match error.reason() {
             RichReason::ExpectedFound {
                 expected,
                 found: Some(found),
@@ -66,10 +67,16 @@ pub fn write_parse_errors<'src>(
                 _ => None,
             },
             _ => None,
-        })
-        .finish()
-        .write(sources([(file_name.clone(), src)]), &mut *w)
-        .unwrap()
+        } {
+            report.with_help(help)
+        } else {
+            report
+        };
+
+        report
+            .finish()
+            .write(sources([(file_name.clone(), src)]), &mut *w)
+            .unwrap()
     }
 }
 
@@ -90,7 +97,7 @@ pub fn write_semantic_error(
     w: &mut impl std::io::Write,
 ) {
     let error = error.borrow();
-    Report::build(
+    let report = Report::build(
         ReportKind::Error,
         (file_name.clone(), error.span.into_range()),
     )
@@ -100,17 +107,19 @@ pub fn write_semantic_error(
         Label::new((file_name.clone(), error.span.into_range()))
             .with_message("Error occurred here.")
             .with_color(Color::Red),
-    )
-    .with_labels(
-        if let SerializationErrorMessage::UnlabeledConstant(Some(offset_span)) = &error.message {
-            vec![Label::new((file_name.clone(), offset_span.into_range()))
+    );
+
+    let report = if let SerializationErrorMessage::UnlabeledConstant(Some(offset_span)) = &error.message {
+        report.with_label(
+            Label::new((file_name.clone(), offset_span.into_range()))
                 .with_message("This is not a valid symbolic name, as it is purely numeric and therefore has been interpreted as an offset.")
-                .with_color(Color::Yellow)]
-        } else {
-            Vec::new()
-        }
-    )
-    .with_helps(match &error.message {
+                .with_color(Color::Yellow),
+        )
+    } else {
+        report
+    };
+
+    let report = if let Some(help) = match &error.message {
         SerializationErrorMessage::UndefinedConstant(constant_name, valid_constants) => {
             let mut considered_similarities = valid_constants.iter().filter_map(|valid_constant| {
                 let sim = rapidfuzz::distance::levenshtein::normalized_similarity(constant_name.to_lowercase().chars(), valid_constant.to_lowercase().chars());
@@ -149,10 +158,16 @@ pub fn write_semantic_error(
             (!considered_similarities.is_empty()).then_some(format!("Did you mean one of these mnemonics? (Ranked by similarity):\n{}", considered_similarities.iter().map(|(s, score)| format!("  - '{}' (similarity: {:.0}%)", s, score * 100.0)).collect::<Vec<_>>().join("\n")))
         }
         _ => None,
-    })
-    .finish()
-    .write(sources([(file_name.clone(), src)]), &mut *w)
-    .unwrap()
+    } {
+        report.with_help(help)
+    } else {
+        report
+    };
+
+    report
+        .finish()
+        .write(sources([(file_name.clone(), src)]), &mut *w)
+        .unwrap()
 }
 
 pub fn semantic_errors_to_string(

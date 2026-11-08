@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-ariadne = { git = "https://codeberg.org/ashley-hawkins/ariadne.git", default-features = false, rev = "4b464e8d90be6db530783e8bc2358cbe0363a0b2" }
+ariadne = { git = "https://codeberg.org/ashley-hawkins/ariadne.git", default-features = false, rev = "a75c4a93274a9bc5fb7de79606a4018526e4567c" }
 chumsky = { version = "0.12.0", default-features = false, features = ["pratt"] }
 logos = { version = "0.16.1", default-features = false, features = ["export_derive"] }
 rapidfuzz = { version = "0.5.0", default-features = false }

@@ -201,7 +201,7 @@ dependencies = [
 [[package]]
 name = "ariadne"
 version = "0.7.0"
-source = "git+https://codeberg.org/ashley-hawkins/ariadne.git?rev=4b464e8d90be6db530783e8bc2358cbe0363a0b2#4b464e8d90be6db530783e8bc2358cbe0363a0b2"
+source = "git+https://codeberg.org/ashley-hawkins/ariadne.git?rev=a75c4a93274a9bc5fb7de79606a4018526e4567c#a75c4a93274a9bc5fb7de79606a4018526e4567c"
 dependencies = [
  "strip-ansi-escapes",
  "unicode-width",
