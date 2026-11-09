@@ -146,15 +146,20 @@ impl InfoPanel {
                     ui.label("Messages");
                 });
                 ui.with_layout(Layout::bottom_up(Align::TOP), |ui| {
-                    ui.label(format!(
-                        "Last frame time: {:.2} ms",
-                        app.ui_state.last_frame_time.as_secs_f64() * 1000.0
-                    ));
-                    ui.label(format!(
-                        "Window size: {} x {}",
-                        ui.ctx().viewport_rect().width(),
-                        ui.ctx().viewport_rect().height()
-                    ));
+                    if app.windows.developer_mode() {
+                        ui.label(format!(
+                            "Last frame time: {:.2} ms",
+                            app.ui_state.last_frame_time.as_secs_f64() * 1000.0
+                        ));
+                        ui.label(format!(
+                            "Window size: {} x {}",
+                            ui.ctx().viewport_rect().width(),
+                            ui.ctx().viewport_rect().height()
+                        ));
+                        if ui.button("Trigger crash").clicked() {
+                            panic!("Crash triggered manually from developer mode");
+                        }
+                    }
 
                     let w = ui.available_width();
                     ui.spacing_mut().slider_width =

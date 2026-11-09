@@ -20,6 +20,9 @@ pub enum WindowOpenId {
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct AboutWindow {
     open: bool,
+    // Default so state saved before this field existed still loads.
+    #[serde(default)]
+    developer_mode: bool,
 }
 
 const GITHUB_URL: &str = "https://github.com/ashley-hawkins/extended-brookshear-assembler";
@@ -62,6 +65,7 @@ impl AboutWindow {
                             .open_in_new_tab(true),
                         );
                     });
+                    ui.checkbox(&mut self.developer_mode, "Developer mode");
                     powered_by_egui_and_eframe(ui);
                 });
             });
@@ -239,6 +243,10 @@ pub struct AppWindows {
 impl AppWindows {
     pub fn initialize(&mut self) {
         self.help.initialize();
+    }
+
+    pub fn developer_mode(&self) -> bool {
+        self.about.developer_mode
     }
 
     pub fn open(&mut self, window: WindowOpenId) {
