@@ -1005,7 +1005,7 @@ impl App {
     }
 }
 
-fn install_fonts(ctx: &egui::Context) {
+pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::empty();
     fonts.font_data.insert(
         "ui".into(),

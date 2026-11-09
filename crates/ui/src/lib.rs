@@ -5,4 +5,4 @@
 mod ansi;
 mod app;
 mod helpers;
-pub use app::App;
+pub use app::{App, install_fonts};
