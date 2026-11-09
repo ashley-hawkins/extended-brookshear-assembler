@@ -12,6 +12,7 @@ thiserror = { version = "2.0.21", default-features = false }
 [profile.release]
 opt-level = "z" # fast and small wasm
 strip = true
+trim-paths = "all" # keep local paths (username, project dir) out of panic locations
 lto = true
 codegen-units = 1
 
