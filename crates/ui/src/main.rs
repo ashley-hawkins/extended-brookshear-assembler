@@ -123,6 +123,30 @@ fn main() {
     // Redirect `log` message to `console.log` and friends:
     eframe::WebLogger::init(log::LevelFilter::Debug).ok();
 
+    // Stash the panic message where the JS crash overlay in index.html can read it.
+    // Installed before eframe so eframe's own hook chains to it.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(window) = web_sys::window() {
+            let _ = js_sys::Reflect::set(
+                &window,
+                &"__panic_message".into(),
+                &format!(
+                    "{info}\nversion: {}\nbuild: {}{}",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("GIT_HASH"),
+                    if env!("GIT_DIRTY") == "true" {
+                        " (dirty)"
+                    } else {
+                        ""
+                    },
+                )
+                .into(),
+            );
+        }
+        previous_hook(info);
+    }));
+
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {

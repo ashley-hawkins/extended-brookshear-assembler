@@ -137,6 +137,72 @@
         <div class="lds-dual-ring"></div>
     </div>
 
+    <!-- Top-level panic / crash handler. Rust panics on wasm surface as uncaught RuntimeErrors. -->
+    <div id="crash_overlay" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.85);color:#f0f0f0;font-family:Ubuntu-Light,Helvetica,sans-serif;overflow:auto;padding:24px;box-sizing:border-box">
+        <h2>The app has crashed</h2>
+        <p>An unexpected error occurred. Please
+            <a id="crash_report_link" style="color:#8cf" href="https://github.com/ashley-hawkins/extended-brookshear-assembler/issues/new?title=Crash%20report" target="_blank" rel="noopener">report this issue on GitHub</a>
+            and include the details below, then reload the page.</p>
+        <button id="crash_copy" type="button" style="margin-bottom:8px;padding:6px 12px;font:inherit;cursor:pointer">Copy details</button>
+        <pre id="crash_details" style="white-space:pre-wrap;background:#222;padding:12px;border-radius:4px;user-select:text"></pre>
+    </div>
+    <script>
+        (function () {
+            var shown = false;
+            function show(msg) {
+                var overlay = document.getElementById('crash_overlay');
+                if (!overlay) return;
+                var details = document.getElementById('crash_details');
+                if (window.__panic_message) msg = window.__panic_message + '\n\n' + msg;
+                var text = msg + '\n\nuser agent: ' + navigator.userAgent + '\nurl: ' + location.href;
+                if (shown) { details.textContent += '\n\n---\n' + msg; return; }
+                shown = true;
+                details.textContent = text;
+                // Prefill the issue with the details in a code fence, as the desktop crash window does.
+                // Truncated to stay under GitHub's URL length limit.
+                var link = document.getElementById('crash_report_link');
+                if (link) {
+                    link.href += '&body=' + encodeURIComponent('```\n' + text.slice(0, 3500) + '\n```');
+                }
+                overlay.style.display = 'block';
+                var loading = document.getElementById('loading_text');
+                if (loading) loading.remove();
+            }
+            var copyButton = document.getElementById('crash_copy');
+            if (copyButton) {
+                copyButton.addEventListener('click', function () {
+                    var text = document.getElementById('crash_details').textContent;
+                    function done(label) {
+                        copyButton.textContent = label;
+                        setTimeout(function () { copyButton.textContent = 'Copy details'; }, 2000);
+                    }
+                    function fallback() {
+                        // navigator.clipboard needs a secure context; select + execCommand works elsewhere.
+                        var range = document.createRange();
+                        range.selectNodeContents(document.getElementById('crash_details'));
+                        var sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                        done(document.execCommand('copy') ? 'Copied!' : 'Press Ctrl+C to copy');
+                    }
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).then(function () { done('Copied!'); }, fallback);
+                    } else {
+                        fallback();
+                    }
+                });
+            }
+            window.addEventListener('error', function (e) {
+                var err = e.error;
+                show((err && err.stack) || e.message || String(e));
+            });
+            window.addEventListener('unhandledrejection', function (e) {
+                var r = e.reason;
+                show((r && r.stack) || String(r));
+            });
+        })();
+    </script>
+
     <!--Register Service Worker. this will cache the wasm / js scripts for offline use (for PWA functionality). -->
     <!-- Force refresh (Ctrl + F5) to load the latest files instead of cached files  -->
     <script>
