@@ -1,0 +1,38 @@
+name: Symbolize crash report
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read # check out the script
+  issues: write  # post the resolved trace
+
+jobs:
+  symbolize:
+    runs-on: ubuntu-latest
+    # Cheap pre-filter; the script does the real validation.
+    if: contains(github.event.issue.body, 'wasm-function[')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install wasm-tools
+        run: |
+          curl -fsSL https://github.com/bytecodealliance/wasm-tools/releases/download/v1.263.0/wasm-tools-1.263.0-x86_64-linux.tar.gz \
+            | tar xz --strip-components=1 -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Resolve trace
+        env:
+          # Untrusted text: only ever passed through the environment, never interpolated into a command.
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          # Where build_and_deploy.sh publishes the symbols (<base>/symbols/...).
+          SYMBOLS_BASE_URL: ${{ vars.SYMBOLS_BASE_URL || 'https://vole.pages.dev' }}
+        run: python3 .github/scripts/symbolize_issue.py "$RUNNER_TEMP/comment.md"
+      - name: Post comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if [ -s "$RUNNER_TEMP/comment.md" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/comment.md"
+          fi
