@@ -19,4 +19,17 @@ cp "$wasm" "debug-symbols/brookshear_ui_bg-$hash.wasm"
 wasm-tools strip --all "$wasm" -o "$wasm.stripped"
 mv "$wasm.stripped" "$wasm"
 
+# Serve the symbols from dist/symbols/ as <name>-<hash>.wasm.br, brotli-compressed (raw they exceed
+# Cloudflare Pages' 25 MiB per-file limit). assets/_redirects and assets/_headers make them
+# available at <name>-<hash>.wasm. The app never loads them; the crash-report bot does.
+# Older builds are kept in debug-symbols/ and re-copied, so they stay available. Dirty builds are
+# not served: crash reports from them cannot be matched to a commit.
+mkdir -p dist/symbols
+for f in debug-symbols/*.wasm; do
+    [ -e "$f.br" ] || uv run --no-project --with brotli==1.2.1 python -c 'import brotli, sys; open(sys.argv[1] + ".br", "wb").write(brotli.compress(open(sys.argv[1], "rb").read(), quality=11, lgwin=24))' "$f"
+done
+for f in debug-symbols/*.wasm.br; do
+    case "$f" in *-dirty.wasm.br) ;; *) cp "$f" dist/symbols/ ;; esac
+done
+
 ./deploy.sh
