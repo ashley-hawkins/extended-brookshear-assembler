@@ -366,13 +366,13 @@ impl StructuredInstruction {
                 dest.as_index()
             ),
             StructuredInstruction::RotRegRight(register, amount) => {
-                format!("ROT R{:X}, {}", register.as_index(), amount)
+                format!("ROT R{:X}, {:X}", register.as_index(), amount)
             }
             StructuredInstruction::JmpIfEqual(register, jmp_location) => {
                 if register == &Register::R0 {
                     format!("JMP {:02X}", jmp_location)
                 } else {
-                    format!("JMPEQ R{:X}, {:02X}", register.as_index(), jmp_location)
+                    format!("JMPEQ {:02X}, R{:X}", jmp_location, register.as_index())
                 }
             }
             StructuredInstruction::Halt => "HALT".to_string(),
@@ -395,8 +395,8 @@ impl StructuredInstruction {
                             CmpjmpOperator::Gt => "GT",
                             CmpjmpOperator::Lt => "LT",
                         },
-                        comparison_operand_reg.as_index(),
                         jmp_location_reg.as_index(),
+                        comparison_operand_reg.as_index(),
                     )
                 }
             }
