@@ -5,12 +5,14 @@ cd "$(dirname "$0")"
 # Build with DWARF (the workspace release profile strips it), then keep the full file as the
 # debug-symbols copy and ship a stripped one. Needs `cargo binstall wasm-tools` and `uv`.
 # Resolve a browser stack trace with: wasm-tools addr2line debug-symbols/<file>.wasm 0xOFFSET...
+echo "==> [1/5] Building the wasm with debug info (trunk)"
 CARGO_UNSTABLE_BUILD_STD=std,panic_abort \
 CARGO_UNSTABLE_BUILD_STD_FEATURES=optimize_for_size \
 CARGO_PROFILE_RELEASE_STRIP=none \
 CARGO_PROFILE_RELEASE_DEBUG=limited \
 trunk build --release --public-url './'
 
+echo "==> [2/5] Saving the debug symbols and stripping the shipped wasm"
 hash=$(git rev-parse --short HEAD)
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then hash="$hash-dirty"; fi
 mkdir -p debug-symbols
@@ -26,10 +28,15 @@ mv "$wasm.stripped" "$wasm"
 # not served: crash reports from them cannot be matched to a commit.
 mkdir -p dist/symbols
 for f in debug-symbols/*.wasm; do
-    [ -e "$f.br" ] || uv run --no-project --with brotli==1.2.1 python -c 'import brotli, sys; open(sys.argv[1] + ".br", "wb").write(brotli.compress(open(sys.argv[1], "rb").read(), quality=11, lgwin=24))' "$f"
+    if [ ! -e "$f.br" ]; then
+        echo "==> [3/5] Compressing $f with brotli (level 11, takes a few minutes)"
+        uv run --no-project --with brotli==1.2.1 python -c 'import brotli, sys; open(sys.argv[1] + ".br", "wb").write(brotli.compress(open(sys.argv[1], "rb").read(), quality=11, lgwin=24))' "$f"
+    fi
 done
+echo "==> [4/5] Copying the compressed symbols into dist/symbols/"
 for f in debug-symbols/*.wasm.br; do
     case "$f" in *-dirty.wasm.br) ;; *) cp "$f" dist/symbols/ ;; esac
 done
 
+echo "==> [5/5] Deploying"
 ./deploy.sh
