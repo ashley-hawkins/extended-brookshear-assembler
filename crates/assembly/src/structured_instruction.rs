@@ -630,6 +630,19 @@ fn convert_2regin_1regout(
     let [src1, src2] = assert_operands(detail)?;
     let dst = assert_destination_operand(detail)?;
 
+    let deref_checker = |src: &Spanned<Operand<'_>>| {
+        if src.deref {
+            return Err(SerializationErrorMessage::InvalidOperand(
+                "Source operands for this instruction must be direct register access. Indirection is not allowed.".to_string(),
+            )
+            .with_span(src.span));
+        }
+        Ok(())
+    };
+
+    deref_checker(src1)?;
+    deref_checker(src2)?;
+
     let src1reg = match src1.inner.core {
         CoreOperand::Register(r) => r,
         _ => {
